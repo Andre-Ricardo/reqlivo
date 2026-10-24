@@ -68,7 +68,7 @@ jobs:
           WEBKIT_DISABLE_COMPOSITING_MODE: '1'
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: |
-          dbus-run-session -- xvfb-run -a -s '-screen 0 1600x1000x24' bash <<'SMOKE'
+          xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- bash <<'SMOKE'
           set -euo pipefail
           unset WAYLAND_DISPLAY
           openbox --sm-disable > window-manager.log 2>&1 &

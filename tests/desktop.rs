@@ -3,6 +3,47 @@ use reqlivo::server::AppState;
 use reqlivo::store::{CollectionStore, init_collection};
 use serde_json::json;
 
+#[test]
+fn appimage_opens_a_relative_collection_when_runtime_only_preserves_pwd() {
+    let temp = tempfile::tempdir().unwrap();
+    init_collection(&temp.path().join("api"), "AppImage").unwrap();
+    let path = reqlivo::desktop::collection_argument(
+        "api".into(),
+        true,
+        None,
+        Some(temp.path().to_path_buf()),
+    );
+    assert_eq!(
+        CollectionStore::open(&path).unwrap().manifest.info.name,
+        "AppImage"
+    );
+}
+
+#[test]
+fn startup_preserves_absolute_paths_and_normal_process_working_directories() {
+    let temp = tempfile::tempdir().unwrap();
+    let absolute = temp.path().join("api");
+    let other = temp.path().join("outra");
+    assert_eq!(
+        reqlivo::desktop::collection_argument(
+            absolute.clone(),
+            true,
+            Some(other.clone()),
+            Some(other.clone()),
+        ),
+        absolute
+    );
+    assert_eq!(
+        reqlivo::desktop::collection_argument(
+            "api".into(),
+            false,
+            Some(other.clone()),
+            Some(other),
+        ),
+        std::path::PathBuf::from("api")
+    );
+}
+
 #[tokio::test]
 async fn ipc_creates_persists_and_reopens_requests_without_a_listener() {
     let temp = tempfile::tempdir().unwrap();

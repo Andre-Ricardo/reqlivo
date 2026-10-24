@@ -110,13 +110,12 @@ fn main() {
                 Some(_) => return Err("uso: reqlivo-desktop [--collection <diretório>]".into()),
             };
             let store = if let Some(path) = explicit {
-                // AppRun muda o cwd; o runtime AppImage preserva a origem em OWD.
-                let path = match (std::env::var_os("APPIMAGE"), std::env::var_os("OWD")) {
-                    (Some(_), Some(original)) if path.is_relative() => {
-                        PathBuf::from(original).join(path)
-                    }
-                    _ => path,
-                };
+                let path = reqlivo::desktop::collection_argument(
+                    path,
+                    std::env::var_os("APPIMAGE").is_some(),
+                    std::env::var_os("OWD").map(PathBuf::from),
+                    std::env::var_os("PWD").map(PathBuf::from),
+                );
                 CollectionStore::open(&path)?
             } else if let Some(store) = std::fs::read_to_string(&last_collection)
                 .ok()

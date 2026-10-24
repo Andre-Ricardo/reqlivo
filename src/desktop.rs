@@ -3,9 +3,28 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, Uri};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::path::PathBuf;
 use tower::ServiceExt;
 
 use crate::server::{AppState, router};
+
+/// AppRun altera o cwd. Os runtimes preservam a origem em OWD ou no PWD do shell.
+pub fn collection_argument(
+    path: PathBuf,
+    appimage: bool,
+    original_dir: Option<PathBuf>,
+    shell_dir: Option<PathBuf>,
+) -> PathBuf {
+    if appimage && path.is_relative() {
+        if let Some(base) = original_dir
+            .filter(|path| path.is_absolute())
+            .or_else(|| shell_dir.filter(|path| path.is_absolute()))
+        {
+            return base.join(path);
+        }
+    }
+    path
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IpcResponse {
