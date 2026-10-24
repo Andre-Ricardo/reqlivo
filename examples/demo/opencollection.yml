@@ -1,0 +1,44 @@
+# Reqlivo — arquivo local, formato OpenCollection 1.0.0
+# Editável fora do aplicativo. IDs ficam em extensions.reqlivo.id.
+opencollection: 1.0.0
+info:
+  name: Reqlivo Demo
+  summary: Coleção local criada pelo Reqlivo.
+config:
+  environments:
+  - name: dev
+    variables:
+    - name: baseUrl
+      value: http://127.0.0.1:18080
+    - name: token
+      value: token-demo
+    - name: apiToken
+      value: token-demo-dev
+  - name: seguro
+    extends: dev
+    variables:
+    - name: baseUrl
+      value: http://127.0.0.1:18080
+    - name: apiToken
+      secret: true
+extensions:
+  reqlivo:
+    schemaVersion: 1
+    id: col_276998b954a54ce1
+    settings:
+      default_environment: dev
+      default_timeout_ms: 30000
+      follow_redirects: true
+      max_redirects: 5
+      offline_only: false
+      allow_process_env: false
+      max_response_bytes: 10485760
+      script_timeout_ms: 2000
+    secret_refs:
+    - name: apiToken
+      environment: seguro
+      provider: env
+      key: REQLIVO_DEMO_TOKEN
+    environment_ids:
+      dev: env_fe004ebe487e43bf
+      seguro: env_d000000000000002

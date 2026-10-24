@@ -1,0 +1,15 @@
+/target
+
+# Estado local do Reqlivo (cache, histórico, logs, imports preservados)
+.reqlivo/
+
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+
+# Build local da documentação e Python
+docs/_site/
+docs/.jekyll-cache/
+__pycache__/
+*.pyc

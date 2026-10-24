@@ -1,0 +1,21 @@
+info:
+  name: Token secreto do processo
+  type: http
+  seq: 1
+  tags: [segredo, demo]
+http:
+  method: GET
+  url: "{{baseUrl}}/echo"
+  auth:
+    type: bearer
+    token: "{{apiToken}}"
+runtime:
+  assertions:
+  - expression: res.status
+    operator: eq
+    value: "200"
+settings: {}
+extensions:
+  reqlivo:
+    schemaVersion: 1
+    id: req_6c4d5e6f708192a3

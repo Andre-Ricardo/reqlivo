@@ -1,0 +1,58 @@
+[package]
+name = "reqlivo"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Reqlivo — cliente de APIs local-first, open source e extensível"
+license = "MIT"
+repository = "https://github.com/Andre-Ricardo/reqlivo"
+homepage = "https://andre-ricardo.github.io/reqlivo/"
+readme = "README.md"
+default-run = "reqlivo"
+
+[lib]
+name = "reqlivo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "reqlivo"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"
+mime_guess = "2"
+reqwest = { version = "0.12", default-features = false, features = [
+    "brotli",
+    "cookies",
+    "deflate",
+    "gzip",
+    "json",
+    "multipart",
+    "rustls-tls",
+    "stream",
+] }
+rquickjs = "0.14"
+regex = "1"
+roxmltree = "0.20"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+shell-words = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+lto = "thin"
+strip = true

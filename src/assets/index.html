@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>Reqlivo</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Pular para o conteúdo</a>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">R</span>
+      <span class="brand-text">
+        <strong>Reqlivo</strong>
+        <small id="collectionName">carregando…</small>
+      </span>
+    </div>
+    <div class="topbar-actions">
+      <label class="env-picker" for="environment">
+        <span>Ambiente</span>
+        <select id="environment" aria-label="Ambiente ativo"></select>
+      </label>
+      <span id="offlineBadge" class="badge badge-offline" hidden>Offline</span>
+      <button type="button" id="newRequestBtn" class="btn">+ Requisição</button>
+      <button type="button" id="newFolderBtn" class="btn">+ Pasta</button>
+      <button type="button" id="runnerBtn" class="btn">Runner</button>
+      <button type="button" id="environmentsBtn" class="btn">Ambientes</button>
+      <button type="button" id="importBtn" class="btn">Importar</button>
+      <button type="button" id="exportBtn" class="btn">Exportar</button>
+      <button type="button" id="validateBtn" class="btn">Validar</button>
+      <button type="button" id="settingsBtn" class="btn btn-icon" aria-label="Configurações da coleção" title="Configurações">⚙</button>
+      <button type="button" id="helpBtn" class="btn btn-icon" aria-label="Ajuda e atalhos" title="Ajuda">?</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" aria-label="Coleção">
+      <div class="search-row">
+        <label class="sr-only" for="treeSearch">Filtrar requisições</label>
+        <input id="treeSearch" type="search" placeholder="Filtrar (Ctrl+K)" autocomplete="off">
+        <button type="button" id="reloadBtn" class="btn btn-icon" title="Recarregar coleção" aria-label="Recarregar coleção">↻</button>
+      </div>
+      <nav id="tree" class="tree" aria-label="Árvore de pastas e requisições"></nav>
+      <div class="sidebar-footer">
+        <span id="collectionRoot" class="muted ellipsis"></span>
+        <button type="button" id="warningsBtn" class="btn btn-small" hidden></button>
+      </div>
+    </aside>
+
+    <main id="main" class="main" tabindex="-1">
+      <section id="emptyState" class="empty-state">
+        <div class="empty-card">
+          <p class="eyebrow">Local-first · OpenCollection 1.0.0</p>
+          <h1>Coleção pronta para receber requisições</h1>
+          <p>Selecione uma requisição na árvore ou crie uma nova. A interface e o runner usam o mesmo modelo da CLI.</p>
+          <div class="empty-actions">
+            <button type="button" class="btn btn-primary" id="emptyNewRequest">Criar requisição</button>
+            <button type="button" class="btn" id="emptyImport">Importar coleção</button>
+          </div>
+          <dl class="facts">
+            <div><dt>Segredos</dt><dd>somente referências; valores vêm do processo</dd></div>
+            <div><dt>Salvamento</dt><dd>arquivos YAML com detecção de conflito</dd></div>
+            <div><dt>Offline</dt><dd>bloqueia destinos externos quando ativo</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section id="requestPanel" class="request-panel" hidden>
+        <div class="request-header">
+          <div class="request-title">
+            <label class="sr-only" for="requestName">Nome da requisição</label>
+            <input id="requestName" class="request-name" type="text" autocomplete="off">
+            <div class="request-meta">
+              <span id="requestPath" class="muted"></span>
+              <span id="saveState" class="save-state" role="status" aria-live="polite"></span>
+            </div>
+          </div>
+          <div class="header-actions">
+            <button type="button" id="saveBtn" class="btn">Salvar</button>
+            <button type="button" id="deleteRequestBtn" class="btn btn-danger">Excluir</button>
+          </div>
+        </div>
+
+        <div class="request-line">
+          <label class="sr-only" for="method">Método HTTP</label>
+          <select id="method" class="method-select">
+            <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option>
+            <option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+          </select>
+          <label class="sr-only" for="url">URL da requisição</label>
+          <input id="url" class="url-input" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:18080/echo">
+          <button type="button" id="sendBtn" class="btn btn-primary">Enviar</button>
+          <button type="button" id="cancelSendBtn" class="btn btn-danger" hidden>Cancelar</button>
+        </div>
+        <div id="requestWarnings" class="inline-warnings" hidden></div>
+
+        <div class="tabs" role="tablist" aria-label="Editor da requisição">
+          <button type="button" role="tab" class="tab is-active" data-tab="params" aria-selected="true">Params</button>
+          <button type="button" role="tab" class="tab" data-tab="headers" aria-selected="false">Headers</button>
+          <button type="button" role="tab" class="tab" data-tab="body" aria-selected="false">Body</button>
+          <button type="button" role="tab" class="tab" data-tab="auth" aria-selected="false">Auth</button>
+          <button type="button" role="tab" class="tab" data-tab="scripts" aria-selected="false">Scripts</button>
+          <button type="button" role="tab" class="tab" data-tab="tests" aria-selected="false">Testes</button>
+          <button type="button" role="tab" class="tab" data-tab="docs" aria-selected="false">Docs</button>
+        </div>
+
+        <div class="tab-panels">
+          <div class="tab-panel is-active" data-panel="params" role="tabpanel">
+            <div class="panel-head">
+              <div><h2>Parâmetros</h2><p>Query string e parâmetros de caminho (<code>:nome</code>).</p></div>
+              <button type="button" class="btn btn-small" id="addParamBtn">Adicionar</button>
+            </div>
+            <div id="paramsEditor" class="kv-editor"></div>
+          </div>
+
+          <div class="tab-panel" data-panel="headers" role="tabpanel" hidden>
+            <div class="panel-head">
+              <div><h2>Cabeçalhos</h2><p>Valores aceitam <code>{{variavel}}</code>. Cabeçalhos herdados aparecem na execução.</p></div>
+              <button type="button" class="btn btn-small" id="addHeaderBtn">Adicionar</button>
+            </div>
+            <div id="headersEditor" class="kv-editor"></div>
+          </div>
+
+          <div class="tab-panel" data-panel="body" role="tabpanel" hidden>
+            <div class="panel-head">
+              <div><h2>Corpo</h2><p>JSON e XML são validados antes do envio.</p></div>
+              <div class="panel-tools">
+                <label class="inline-label" for="bodyType">Tipo</label>
+                <select id="bodyType">
+                  <option value="none">nenhum</option>
+                  <option value="json">JSON</option>
+                  <option value="text">texto</option>
+                  <option value="xml">XML</option>
+                  <option value="sparql">SPARQL</option>
+                  <option value="form-urlencoded">form-urlencoded</option>
+                  <option value="multipart-form">multipart-form</option>
+                </select>
+                <button type="button" id="formatJsonBtn" class="btn btn-small">Formatar JSON</button>
+              </div>
+            </div>
+            <label class="sr-only" for="bodyData">Conteúdo do corpo</label>
+            <textarea id="bodyData" class="code-editor" spellcheck="false" placeholder="Conteúdo do corpo"></textarea>
+            <div id="bodyForm" class="kv-editor" hidden></div>
+          </div>
+
+          <div class="tab-panel" data-panel="auth" role="tabpanel" hidden>
+            <div class="panel-head">
+              <div><h2>Autenticação</h2><p>Herda da pasta ou da coleção quando o modo é <em>herdar</em>. Prefira variáveis/segredos.</p></div>
+            </div>
+            <div id="authEditor" class="form-grid"></div>
+          </div>
+
+          <div class="tab-panel" data-panel="scripts" role="tabpanel" hidden>
+            <div class="panel-head">
+              <div><h2>Scripts JavaScript</h2><p>API <code>rq.env</code>, <code>rq.request</code>, <code>rq.response</code>, <code>test</code> e <code>expect</code>. Execução síncrona com limite de tempo.</p></div>
+              <button type="button" class="btn btn-small" id="addScriptBtn">Adicionar script</button>
+            </div>
+            <div id="scriptsEditor" class="scripts-editor"></div>
+          </div>
+
+          <div class="tab-panel" data-panel="tests" role="tabpanel" hidden>
+            <div class="panel-head">
+              <div><h2>Asserções declarativas</h2><p>Expressões como <code>res.status</code> e <code>res.body.user.name</code>. Operadores: eq, neq, gt, gte, lt, lte, contains, startsWith, endsWith, matches, in, isString, isNumber, isBoolean, isArray, isObject, isNull, exists, notExists, lengthEq.</p></div>
+              <button type="button" class="btn btn-small" id="addAssertionBtn">Adicionar asserção</button>
+            </div>
+            <div id="testsEditor" class="kv-editor"></div>
+          </div>
+
+          <div class="tab-panel" data-panel="docs" role="tabpanel" hidden>
+            <div class="panel-head">
+              <div><h2>Documentação e tags</h2><p>Tags alimentam o filtro do runner. Documentação fica no arquivo da requisição.</p></div>
+            </div>
+            <label class="field-label" for="tagsInput">Tags (separadas por vírgula)</label>
+            <input id="tagsInput" type="text" placeholder="smoke, pagamentos">
+            <label class="field-label" for="docsInput">Documentação</label>
+            <textarea id="docsInput" class="code-editor" rows="12" placeholder="Notas, exemplos e critérios de aceite desta requisição."></textarea>
+          </div>
+        </div>
+
+        <section class="response-panel" aria-label="Resposta">
+          <div class="response-head">
+            <div class="response-title">
+              <span id="responseStatus" class="status-pill status-idle">sem resposta</span>
+              <span id="responseMeta" class="muted"></span>
+            </div>
+            <div class="response-tabs" role="tablist" aria-label="Detalhes da resposta">
+              <button type="button" role="tab" class="tab tab-small is-active" data-response-tab="body" aria-selected="true">Corpo</button>
+              <button type="button" role="tab" class="tab tab-small" data-response-tab="headers" aria-selected="false">Headers</button>
+              <button type="button" role="tab" class="tab tab-small" data-response-tab="tests" aria-selected="false">Testes</button>
+              <button type="button" role="tab" class="tab tab-small" data-response-tab="logs" aria-selected="false">Logs</button>
+            </div>
+          </div>
+          <div id="responseBody" class="response-body">
+            <p class="muted">Envie a requisição para ver a resposta, os metadados, os testes e os logs redigidos.</p>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="runnerDialog" class="dialog dialog-wide">
+    <form method="dialog" class="dialog-head">
+      <div><h2>Runner local</h2><p>Executa a coleção com os mesmos contratos da CLI e grava o histórico em <code>.reqlivo/</code>.</p></div>
+      <button type="submit" class="btn btn-icon" aria-label="Fechar runner">✕</button>
+    </form>
+    <div class="dialog-body">
+      <div class="form-grid form-grid-3">
+        <label>Ambiente<select id="runEnvironment"></select></label>
+        <label>Tags (qualquer)<input id="runTags" type="text" placeholder="smoke, erros"></label>
+        <label>Pasta<select id="runFolder"><option value="">coleção inteira</option></select></label>
+      </div>
+      <label class="check-row"><input type="checkbox" id="runCurrentOnly"> Executar somente a requisição aberta</label>
+      <div class="dialog-actions">
+        <button type="button" id="startRunBtn" class="btn btn-primary">Executar</button>
+        <button type="button" id="cancelRunBtn" class="btn btn-danger" hidden>Cancelar execução</button>
+        <button type="button" id="loadHistoryBtn" class="btn">Histórico</button>
+      </div>
+      <div id="runResult" class="run-result"><p class="muted">Nenhuma execução iniciada nesta sessão.</p></div>
+      <div id="runHistory" class="history-list" hidden></div>
+    </div>
+  </dialog>
+
+  <dialog id="importDialog" class="dialog dialog-wide">
+    <form method="dialog" class="dialog-head">
+      <div><h2>Importar</h2><p>O arquivo original é preservado em <code>.reqlivo/imports/</code>. Perdas são listadas explicitamente.</p></div>
+      <button type="submit" class="btn btn-icon" aria-label="Fechar importação">✕</button>
+    </form>
+    <div class="dialog-body">
+      <div class="form-grid form-grid-3">
+        <label>Formato<select id="importFormat"><option value="curl">cURL</option><option value="postman">Postman v2.1</option><option value="opencollection">OpenCollection</option></select></label>
+        <label>Pasta de destino<select id="importParent"><option value="">raiz</option></select></label>
+        <label>Arquivo<input id="importFile" type="file" accept=".json,.yml,.yaml,.txt"></label>
+      </div>
+      <label class="field-label" for="importContent">Conteúdo ou comando cURL</label>
+      <textarea id="importContent" class="code-editor" rows="8" spellcheck="false" placeholder="curl http://127.0.0.1:18080/echo"></textarea>
+      <label class="field-label" for="importPath">Ou caminho local (diretório OpenCollection, arquivo Postman/cURL)</label>
+      <input id="importPath" type="text" placeholder="/caminho/para/colecao">
+      <div class="dialog-actions">
+        <button type="button" id="doImportBtn" class="btn btn-primary">Importar</button>
+      </div>
+      <div id="importResult" class="report-box" hidden></div>
+    </div>
+  </dialog>
+
+  <dialog id="exportDialog" class="dialog dialog-wide">
+    <form method="dialog" class="dialog-head">
+      <div><h2>Exportar</h2><p>Segredos literais não são exportados. Perdas e avisos são listados.</p></div>
+      <button type="submit" class="btn btn-icon" aria-label="Fechar exportação">✕</button>
+    </form>
+    <div class="dialog-body">
+      <div class="form-grid form-grid-3">
+        <label>Formato<select id="exportFormat"><option value="curl">cURL</option><option value="postman">Postman v2.1</option><option value="opencollection">OpenCollection</option><option value="project">Projeto</option></select></label>
+        <label>Requisição (cURL)<select id="exportRequest"><option value="">requisição aberta</option></select></label>
+        <label>Destino (projeto)<input id="exportDestination" type="text" placeholder="/tmp/minha-colecao"></label>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="doExportBtn" class="btn btn-primary">Exportar</button>
+        <button type="button" id="downloadExportBtn" class="btn" hidden>Baixar conteúdo</button>
+      </div>
+      <div id="exportResult" class="report-box" hidden></div>
+      <label class="field-label" for="exportContent">Conteúdo exportado</label>
+      <textarea id="exportContent" class="code-editor" rows="12" readonly></textarea>
+    </div>
+  </dialog>
+
+  <dialog id="validateDialog" class="dialog">
+    <form method="dialog" class="dialog-head">
+      <div><h2>Validar coleção</h2><p>Verifica arquivos, corpos e recursos não suportados sem enviar requisições.</p></div>
+      <button type="submit" class="btn btn-icon" aria-label="Fechar validação">✕</button>
+    </form>
+    <div class="dialog-body">
+      <div id="validateResult" class="report-box"></div>
+    </div>
+  </dialog>
+
+  <dialog id="envDialog" class="dialog dialog-wide">
+    <form method="dialog" class="dialog-head">
+      <div><h2>Ambientes e segredos</h2><p>Segredos são referências a variáveis do processo (<code>REQLIVO_*</code>). O valor nunca é gravado na coleção.</p></div>
+      <button type="submit" class="btn btn-icon" aria-label="Fechar ambientes">✕</button>
+    </form>
+    <div class="dialog-body">
+      <div class="form-grid form-grid-3">
+        <label>Ambiente<select id="envSelect"></select></label>
+        <label>Nome<input id="envName" type="text"></label>
+        <label>Herda de<input id="envExtends" type="text" placeholder="opcional"></label>
+      </div>
+      <label class="check-row"><input type="checkbox" id="envDefault"> Tornar ambiente padrão</label>
+      <div class="panel-head"><h3>Variáveis</h3><button type="button" id="addEnvVarBtn" class="btn btn-small">Adicionar variável</button></div>
+      <div id="envVarsEditor" class="kv-editor"></div>
+      <div class="dialog-actions">
+        <button type="button" id="saveEnvBtn" class="btn btn-primary">Salvar ambiente</button>
+        <button type="button" id="newEnvBtn" class="btn">Novo ambiente</button>
+        <button type="button" id="deleteEnvBtn" class="btn btn-danger">Excluir ambiente</button>
+      </div>
+      <div id="envResult" class="report-box" hidden></div>
+    </div>
+  </dialog>
+
+  <dialog id="settingsDialog" class="dialog">
+    <form method="dialog" class="dialog-head">
+      <div><h2>Configurações</h2><p>Preferências ficam em <code>extensions.reqlivo.settings</code>.</p></div>
+      <button type="submit" class="btn btn-icon" aria-label="Fechar configurações">✕</button>
+    </form>
+    <div class="dialog-body">
+      <div class="form-grid form-grid-2">
+        <label>Timeout padrão (ms)<input id="setTimeout" type="number" min="0" step="100"></label>
+        <label>Timeout de script (ms)<input id="setScriptTimeout" type="number" min="50" max="60000" step="50"></label>
+        <label>Máximo de redirecionamentos<input id="setRedirects" type="number" min="0" max="50"></label>
+        <label>Tamanho máximo da resposta (bytes)<input id="setMaxResponse" type="number" min="1024" step="1024"></label>
+        <label>Ambiente padrão<select id="setDefaultEnv"><option value="">nenhum</option></select></label>
+        <label class="check-row"><input type="checkbox" id="setFollowRedirects"> Seguir redirecionamentos</label>
+        <label class="check-row"><input type="checkbox" id="setOffline"> Modo offline (somente loopback/privado)</label>
+        <label class="check-row"><input type="checkbox" id="setAllowProcessEnv"> Permitir <code>{{VAR}}</code> do processo</label>
+      </div>
+      <div class="dialog-actions"><button type="button" id="saveSettingsBtn" class="btn btn-primary">Salvar configurações</button></div>
+      <div id="settingsResult" class="report-box" hidden></div>
+    </div>
+  </dialog>
+
+  <dialog id="helpDialog" class="dialog">
+    <form method="dialog" class="dialog-head">
+      <div><h2>Ajuda e atalhos</h2><p>Reqlivo MVP · acessível por teclado.</p></div>
+      <button type="submit" class="btn btn-icon" aria-label="Fechar ajuda">✕</button>
+    </form>
+    <div class="dialog-body help-grid">
+      <div>
+        <h3>Atalhos</h3>
+        <dl class="shortcuts">
+          <div><dt>Ctrl/Cmd+S</dt><dd>salvar requisição</dd></div>
+          <div><dt>Ctrl/Cmd+Enter</dt><dd>enviar requisição</dd></div>
+          <div><dt>Ctrl/Cmd+K</dt><dd>filtrar árvore</dd></div>
+          <div><dt>Alt+N</dt><dd>nova requisição</dd></div>
+          <div><dt>Alt+F</dt><dd>nova pasta</dd></div>
+          <div><dt>Alt+R</dt><dd>abrir runner</dd></div>
+          <div><dt>?</dt><dd>abrir esta ajuda</dd></div>
+        </dl>
+      </div>
+      <div>
+        <h3>Contratos rápidos</h3>
+        <ul class="plain-list">
+          <li>Variáveis: <code>{{nome}}</code>, com precedência runtime → requisição → pasta → ambiente → coleção.</li>
+          <li>Auth: herda da requisição para a pasta folha até a coleção.</li>
+          <li>Scripts: pré, pós e testes; logs e mensagens de teste são redigidos.</li>
+          <li>Runner: ausência de testes resulta em <strong>executada</strong>, não <strong>passou</strong>.</li>
+          <li>Projeto é a fonte de verdade; cache, logs e lixeira ficam em <code>.reqlivo/</code>.</li>
+        </ul>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+info:
+  name: Básicos
+  type: folder
+  seq: 1
+request:
+  auth:
+    type: bearer
+    token: "{{token}}"
+  headers:
+  - name: X-Colecao
+    value: reqlivo-demo
+extensions:
+  reqlivo:
+    schemaVersion: 1
+    id: fld_3f2a1b4c5d6e7f80

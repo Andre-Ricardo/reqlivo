@@ -1,0 +1,28 @@
+info:
+  name: Echo
+  type: http
+  seq: 1
+  tags: [smoke, demo]
+http:
+  method: GET
+  url: "{{baseUrl}}/echo?origem=reqlivo"
+  auth: inherit
+runtime:
+  scripts:
+  - type: before-request
+    code: |
+      rq.env.set('nomeRuntime', 'demo');
+  - type: tests
+    code: |
+      test('status 200', function () { expect(rq.response.status).toBe(200); });
+      test('corpo ok', function () { expect(rq.response.json().ok).toBe(true); });
+  assertions:
+  - expression: res.status
+    operator: eq
+    value: "200"
+    description: status esperado do servidor sintético
+settings: {}
+extensions:
+  reqlivo:
+    schemaVersion: 1
+    id: req_4a2b3c4d5e6f7081

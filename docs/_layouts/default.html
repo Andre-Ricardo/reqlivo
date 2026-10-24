@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="{{ site.description | escape }}">
+  <title>{{ page.title | default: site.title | escape }} · Documentação</title>
+  <link rel="stylesheet" href="{{ '/assets/docs.css' | relative_url }}">
+</head>
+<body>
+  <a class="skip" href="#conteudo">Ir para o conteúdo</a>
+  <header>
+    <a class="brand" href="{{ '/' | relative_url }}">Reqlivo <span>docs</span></a>
+    <nav aria-label="Documentação">
+      <a href="{{ '/uso.html' | relative_url }}">Uso</a>
+      <a href="{{ '/formato.html' | relative_url }}">Formato</a>
+      <a href="{{ '/mvp.html' | relative_url }}">MVP</a>
+      <a href="{{ '/limitacoes.html' | relative_url }}">Limitações</a>
+      <a href="https://github.com/Andre-Ricardo/reqlivo">GitHub ↗</a>
+    </nav>
+  </header>
+  <main id="conteudo">{{ content }}</main>
+  <footer>Reqlivo · <a href="https://github.com/Andre-Ricardo/reqlivo/blob/main/LICENSE">MIT</a> · <a href="https://github.com/Andre-Ricardo/reqlivo/blob/main/CONTRIBUTING.md">Contribua</a></footer>
+</body>
+</html>

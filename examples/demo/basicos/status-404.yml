@@ -1,0 +1,22 @@
+info:
+  name: Status 404 esperado
+  type: http
+  seq: 2
+  tags: [erros, demo]
+http:
+  method: GET
+  url: "{{baseUrl}}/status/404"
+  auth: inherit
+runtime:
+  assertions:
+  - expression: res.status
+    operator: eq
+    value: "404"
+  - expression: res.body.error
+    operator: eq
+    value: not_found
+settings: {}
+extensions:
+  reqlivo:
+    schemaVersion: 1
+    id: req_5b3c4d5e6f708192
