@@ -96,7 +96,7 @@ Para uma versão posterior, atualize os quatro manifestos e gere o lock npm com 
 
 ## Validação e lacunas
 
-Os testes da ponte IPC verificam criação/persistência/reabertura/exclusão, erros estruturados e rejeição de caminhos externos. Os testes HTTP existentes continuam verificando o transporte e o cancelamento. O CI compila e empacota o desktop em Linux e Windows, inicia o AppImage por quinze segundos no Linux e o executável por dez segundos no Windows, verificando que permanecem abertos. No Linux, força o backend X11 no Xvfb, rejeita captura uniforme e registra a imagem como artifact `desktop-smoke-linux`.
+Os testes da ponte IPC verificam criação/persistência/reabertura/exclusão, erros estruturados e rejeição de caminhos externos. Os testes HTTP existentes continuam verificando o transporte e o cancelamento. O CI compila e empacota o desktop em Linux e Windows, inicia o AppImage no Linux e aguarda até trinta segundos por uma janela visível; no Windows, verifica o executável após dez segundos. No Linux, usa D-Bus e Openbox em uma sessão X11 isolada no Xvfb, exige janela visível e rejeita captura uniforme e registra a imagem como artifact `desktop-smoke-linux`.
 
 **Observado em execução nesta feature:** 62 testes locais aprovados; `cargo check -p reqlivo-desktop --locked` e build debug aprovados. Os builds Linux e Windows geraram os três instaladores e abriram os executáveis. O `.deb` produzido pelo GitHub foi extraído e executado localmente: a coleção sintética apareceu na árvore e no seletor de ambientes, confirmando o carregamento inicial por IPC.
 
