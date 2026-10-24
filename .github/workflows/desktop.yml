@@ -80,10 +80,12 @@ jobs:
           rendered=0
           for attempt in $(seq 1 30); do
             kill -0 "$desktop_pid"
-            import -screen -window root desktop-linux.png
-            if xdotool search --onlyvisible --name Reqlivo >/dev/null && test "$(identify -format '%k' desktop-linux.png)" -gt 20; then
-              rendered=1
-              break
+            if window_id=$(xdotool search --onlyvisible --name '^Reqlivo$' | head -n 1); then
+              import -window "$window_id" desktop-linux.png
+              if test "$(identify -format '%k' desktop-linux.png)" -gt 20; then
+                rendered=1
+                break
+              fi
             fi
             sleep 1
           done
