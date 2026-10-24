@@ -55,6 +55,7 @@ jobs:
       - name: Abrir aplicativo Linux e capturar janela
         if: runner.os == 'Linux'
         env:
+          GDK_BACKEND: x11
           WEBKIT_DISABLE_COMPOSITING_MODE: '1'
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: |
@@ -66,6 +67,7 @@ jobs:
           sleep 10
           kill -0 "$desktop_pid"
           import -window root desktop-linux.png
+          test "$(identify -format '%k' desktop-linux.png)" -gt 20
           SMOKE
       - name: Abrir aplicativo Windows
         if: runner.os == 'Windows'
