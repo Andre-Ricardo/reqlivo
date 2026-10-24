@@ -96,7 +96,7 @@ Para uma versão posterior, atualize os quatro manifestos e gere o lock npm com 
 
 ## Validação e lacunas
 
-Os testes da ponte IPC verificam criação/persistência/reabertura/exclusão, erros estruturados e rejeição de caminhos externos. Os testes HTTP existentes continuam verificando o transporte e o cancelamento. O CI compila e empacota o desktop em Linux e Windows.
+Os testes da ponte IPC verificam criação/persistência/reabertura/exclusão, erros estruturados e rejeição de caminhos externos. Os testes HTTP existentes continuam verificando o transporte e o cancelamento. O CI compila e empacota o desktop em Linux e Windows, inicia o executável por dez segundos e verifica que permanece aberto. No Linux, registra também uma captura da janela em Xvfb como artifact `desktop-smoke-linux`.
 
 Validação interativa ainda necessária em cada plataforma: primeiro uso, seleção/cancelamento de pasta, editar/salvar/enviar, cancelar execução, importar/exportar e fechar janela com rascunho. Build automatizado não equivale a teste visual ou execução de instalador. A execução local do desktop depende da instalação de GTK/WebKit no ambiente de desenvolvimento.
 

@@ -37,7 +37,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils xvfb imagemagick
       - name: Instalar Rust
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt
@@ -52,6 +52,40 @@ jobs:
           cargo test --workspace --locked
       - name: Gerar instaladores
         run: npm run desktop:build -- --bundles ${{ matrix.bundles }} -- --locked
+      - name: Abrir aplicativo Linux e capturar janela
+        if: runner.os == 'Linux'
+        env:
+          WEBKIT_DISABLE_COMPOSITING_MODE: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          xvfb-run -a -s '-screen 0 1600x1000x24' bash <<'SMOKE'
+          set -euo pipefail
+          target/release/reqlivo-desktop --collection examples/demo > desktop-smoke.log 2>&1 &
+          desktop_pid=$!
+          trap 'kill "$desktop_pid" 2>/dev/null || true' EXIT
+          sleep 10
+          kill -0 "$desktop_pid"
+          import -window root desktop-linux.png
+          SMOKE
+      - name: Abrir aplicativo Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $app = Start-Process target/release/reqlivo-desktop.exe -ArgumentList '--collection', 'examples/demo' -PassThru
+          try {
+            Start-Sleep -Seconds 10
+            $app.Refresh()
+            if ($app.HasExited -or $app.MainWindowHandle -eq 0) { throw 'O aplicativo não abriu uma janela.' }
+          } finally {
+            if (-not $app.HasExited) { Stop-Process -Id $app.Id }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always() && runner.os == 'Linux'
+        with:
+          name: desktop-smoke-linux
+          path: |
+            desktop-linux.png
+            desktop-smoke.log
       - uses: actions/upload-artifact@v4
         with:
           name: reqlivo-${{ matrix.platform }}
