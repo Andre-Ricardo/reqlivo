@@ -32,6 +32,7 @@ Abra **http://127.0.0.1:8787**. A interface é servida pelo próprio binário; n
 | [Formato da coleção](formato.md) | YAML, variáveis, autenticação, scripts e segredos. |
 | [Escopo do MVP](mvp.md) | Funcionalidades implementadas e critérios de aceite. |
 | [Limitações](limitacoes.md) | Compatibilidade, restrições e próximos passos. |
+| [Tecnologias e referências](tecnologias.md) | Rust, Node.js, Tauri, bibliotecas e documentação oficial atual consultada com Context7. |
 
 ## Experimente a coleção de demonstração
 

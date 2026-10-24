@@ -1,0 +1,306 @@
+{
+  "queried_on": "2026-10-24T21:15:18.918936+00:00",
+  "crates": {
+    "axum": {
+      "declared": "0.8",
+      "locked": "0.8.9",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/axum/latest/",
+      "docs_locked": "https://docs.rs/axum/0.8.9/",
+      "latest_stable": "0.8.9",
+      "source": "https://crates.io/api/v1/crates/axum",
+      "latest_yanked": false
+    },
+    "base64": {
+      "declared": "0.22",
+      "locked": "0.22.1",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/base64/latest/",
+      "docs_locked": "https://docs.rs/base64/0.22.1/",
+      "latest_stable": "0.23.1",
+      "source": "https://crates.io/api/v1/crates/base64",
+      "latest_yanked": false
+    },
+    "chrono": {
+      "declared": "0.4",
+      "locked": "0.4.45",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/chrono/latest/",
+      "docs_locked": "https://docs.rs/chrono/0.4.45/",
+      "latest_stable": "0.4.45",
+      "source": "https://crates.io/api/v1/crates/chrono",
+      "latest_yanked": false
+    },
+    "clap": {
+      "declared": "4",
+      "locked": "4.6.7",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/clap/latest/",
+      "docs_locked": "https://docs.rs/clap/4.6.7/",
+      "latest_stable": "4.6.7",
+      "source": "https://crates.io/api/v1/crates/clap",
+      "latest_yanked": false
+    },
+    "hex": {
+      "declared": "0.4",
+      "locked": "0.4.3",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/hex/latest/",
+      "docs_locked": "https://docs.rs/hex/0.4.3/",
+      "latest_stable": "0.4.3",
+      "source": "https://crates.io/api/v1/crates/hex",
+      "latest_yanked": false
+    },
+    "mime_guess": {
+      "declared": "2",
+      "locked": "2.0.5",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/mime_guess/latest/",
+      "docs_locked": "https://docs.rs/mime_guess/2.0.5/",
+      "latest_stable": "2.0.5",
+      "source": "https://crates.io/api/v1/crates/mime_guess",
+      "latest_yanked": false
+    },
+    "reqwest": {
+      "declared": "0.12",
+      "locked": "0.12.28",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/reqwest/latest/",
+      "docs_locked": "https://docs.rs/reqwest/0.12.28/",
+      "latest_stable": "0.13.5",
+      "source": "https://crates.io/api/v1/crates/reqwest",
+      "latest_yanked": false
+    },
+    "rquickjs": {
+      "declared": "0.14",
+      "locked": "0.14.0",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/rquickjs/latest/",
+      "docs_locked": "https://docs.rs/rquickjs/0.14.0/",
+      "latest_stable": "0.14.0",
+      "source": "https://crates.io/api/v1/crates/rquickjs",
+      "latest_yanked": false
+    },
+    "regex": {
+      "declared": "1",
+      "locked": "1.13.1",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/regex/latest/",
+      "docs_locked": "https://docs.rs/regex/1.13.1/",
+      "latest_stable": "1.13.1",
+      "source": "https://crates.io/api/v1/crates/regex",
+      "latest_yanked": false
+    },
+    "roxmltree": {
+      "declared": "0.20",
+      "locked": "0.20.0",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/roxmltree/latest/",
+      "docs_locked": "https://docs.rs/roxmltree/0.20.0/",
+      "latest_stable": "0.21.2",
+      "source": "https://crates.io/api/v1/crates/roxmltree",
+      "latest_yanked": false
+    },
+    "serde": {
+      "declared": "1",
+      "locked": "1.0.229",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/serde/latest/",
+      "docs_locked": "https://docs.rs/serde/1.0.229/",
+      "latest_stable": "1.0.229",
+      "source": "https://crates.io/api/v1/crates/serde",
+      "latest_yanked": false
+    },
+    "serde_json": {
+      "declared": "1",
+      "locked": "1.0.154",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/serde_json/latest/",
+      "docs_locked": "https://docs.rs/serde_json/1.0.154/",
+      "latest_stable": "1.0.154",
+      "source": "https://crates.io/api/v1/crates/serde_json",
+      "latest_yanked": false
+    },
+    "serde_yaml": {
+      "declared": "0.9",
+      "locked": "0.9.34+deprecated",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/serde_yaml/latest/",
+      "docs_locked": "https://docs.rs/serde_yaml/0.9.34+deprecated/",
+      "latest_stable": "0.9.34+deprecated",
+      "source": "https://crates.io/api/v1/crates/serde_yaml",
+      "latest_yanked": false
+    },
+    "sha2": {
+      "declared": "0.10",
+      "locked": "0.10.9",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/sha2/latest/",
+      "docs_locked": "https://docs.rs/sha2/0.10.9/",
+      "latest_stable": "0.11.1",
+      "source": "https://crates.io/api/v1/crates/sha2",
+      "latest_yanked": false
+    },
+    "shell-words": {
+      "declared": "1",
+      "locked": "1.1.1",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/shell-words/latest/",
+      "docs_locked": "https://docs.rs/shell-words/1.1.1/",
+      "latest_stable": "1.1.1",
+      "source": "https://crates.io/api/v1/crates/shell-words",
+      "latest_yanked": false
+    },
+    "thiserror": {
+      "declared": "2",
+      "locked": "2.0.21",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/thiserror/latest/",
+      "docs_locked": "https://docs.rs/thiserror/2.0.21/",
+      "latest_stable": "2.0.21",
+      "source": "https://crates.io/api/v1/crates/thiserror",
+      "latest_yanked": false
+    },
+    "tokio": {
+      "declared": "1",
+      "locked": "1.54.0",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/tokio/latest/",
+      "docs_locked": "https://docs.rs/tokio/1.54.0/",
+      "latest_stable": "1.54.1",
+      "source": "https://crates.io/api/v1/crates/tokio",
+      "latest_yanked": false
+    },
+    "tokio-util": {
+      "declared": "0.7",
+      "locked": "0.7.20",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/tokio-util/latest/",
+      "docs_locked": "https://docs.rs/tokio-util/0.7.20/",
+      "latest_stable": "0.7.20",
+      "source": "https://crates.io/api/v1/crates/tokio-util",
+      "latest_yanked": false
+    },
+    "url": {
+      "declared": "2",
+      "locked": "2.5.8",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/url/latest/",
+      "docs_locked": "https://docs.rs/url/2.5.8/",
+      "latest_stable": "2.5.8",
+      "source": "https://crates.io/api/v1/crates/url",
+      "latest_yanked": false
+    },
+    "uuid": {
+      "declared": "1",
+      "locked": "1.26.1",
+      "scope": "runtime",
+      "docs_latest": "https://docs.rs/uuid/latest/",
+      "docs_locked": "https://docs.rs/uuid/1.26.1/",
+      "latest_stable": "1.29.0",
+      "source": "https://crates.io/api/v1/crates/uuid",
+      "latest_yanked": false
+    },
+    "tempfile": {
+      "declared": "3",
+      "locked": "3.27.0",
+      "scope": "dev",
+      "docs_latest": "https://docs.rs/tempfile/latest/",
+      "docs_locked": "https://docs.rs/tempfile/3.27.0/",
+      "latest_stable": "3.27.0",
+      "source": "https://crates.io/api/v1/crates/tempfile",
+      "latest_yanked": false
+    },
+    "tower": {
+      "declared": "0.5",
+      "locked": "0.5.3",
+      "scope": "dev",
+      "docs_latest": "https://docs.rs/tower/latest/",
+      "docs_locked": "https://docs.rs/tower/0.5.3/",
+      "latest_stable": "0.5.3",
+      "source": "https://crates.io/api/v1/crates/tower",
+      "latest_yanked": false
+    }
+  },
+  "tauri": {
+    "latest_stable": "2.12.5",
+    "source": "https://crates.io/api/v1/crates/tauri",
+    "latest_yanked": false
+  },
+  "rust": {
+    "stable": "1.99.1 (58cf8f9c3 2026-10-13)",
+    "release_date": "2026-10-15",
+    "source": "https://static.rust-lang.org/dist/channel-rust-stable.toml"
+  },
+  "node": {
+    "latest": "v26.12.1",
+    "latest_date": "2026-10-21",
+    "lts": "v24.22.1",
+    "lts_name": "Krypton",
+    "source": "https://nodejs.org/dist/index.json"
+  },
+  "context7": [
+    {
+      "technology": "Rust",
+      "library_id": "/rust-lang/reference",
+      "query": "Rust 2024 edition stable language reference"
+    },
+    {
+      "technology": "Node.js",
+      "library_id": "/websites/nodejs_api",
+      "query": "ECMAScript modules CommonJS process.env"
+    },
+    {
+      "technology": "Tauri",
+      "library_id": "/tauri-apps/tauri-docs",
+      "query": "architecture process model security capabilities stable Tauri v2"
+    },
+    {
+      "technology": "Axum",
+      "library_id": "/websites/rs_axum_axum",
+      "query": "Router State Json application routing extractors"
+    },
+    {
+      "technology": "Tokio",
+      "library_id": "/websites/rs_tokio_tokio",
+      "query": "runtime tokio main spawn task cancellation"
+    },
+    {
+      "technology": "Reqwest",
+      "library_id": "/websites/rs_reqwest",
+      "query": "ClientBuilder timeout redirects rustls TLS Cargo features"
+    },
+    {
+      "technology": "rquickjs",
+      "library_id": "/delskayn/rquickjs",
+      "query": "Runtime Context memory limits interrupt handler JavaScript embedding"
+    },
+    {
+      "technology": "Serde",
+      "library_id": "/websites/serde_rs",
+      "query": "derive Serialize Deserialize serde attributes flatten default"
+    },
+    {
+      "technology": "clap",
+      "library_id": "/websites/rs_clap",
+      "query": "derive Parser Subcommand global arguments CLI"
+    },
+    {
+      "technology": "MDN Web Docs",
+      "library_id": "/mdn/content",
+      "query": "Fetch API AbortController DOM browser JavaScript"
+    },
+    {
+      "technology": "Python",
+      "library_id": "/python/cpython",
+      "query": "http.server ThreadingHTTPServer BaseHTTPRequestHandler loopback development server"
+    },
+    {
+      "technology": "OpenCollection",
+      "library_id": "/opencollection-dev/opencollection",
+      "query": "OpenCollection current specification YAML opencollection version extensions"
+    }
+  ],
+  "scope": "Documentação; versões de execução e dependências do projeto não foram atualizadas.",
+  "latest_policy": "Última versão estável informada pela fonte oficial na data da consulta; sem prereleases. Links latest/stable são móveis."
+}

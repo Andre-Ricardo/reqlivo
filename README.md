@@ -162,6 +162,7 @@ Atalhos principais:
 
 ## Documentação
 
+- [Tecnologias e documentação oficial atual](docs/tecnologias.md)
 - [Formato da coleção](docs/formato.md)
 - [Uso da CLI e da interface](docs/uso.md)
 - [Escopo e critérios do MVP](docs/mvp.md)
