@@ -61,10 +61,11 @@ jobs:
         run: |
           xvfb-run -a -s '-screen 0 1600x1000x24' bash <<'SMOKE'
           set -euo pipefail
-          target/release/reqlivo-desktop --collection examples/demo > desktop-smoke.log 2>&1 &
+          appimage=$(find target/release/bundle/appimage -name '*.AppImage' -print -quit)
+          "$appimage" --appimage-extract-and-run --collection examples/demo > desktop-smoke.log 2>&1 &
           desktop_pid=$!
           trap 'kill "$desktop_pid" 2>/dev/null || true' EXIT
-          sleep 10
+          sleep 15
           kill -0 "$desktop_pid"
           import -window root desktop-linux.png
           test "$(identify -format '%k' desktop-linux.png)" -gt 20
