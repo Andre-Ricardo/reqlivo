@@ -2,11 +2,12 @@
 //!
 //! O projeto é a fonte de verdade (OpenCollection 1.0.0 + extensões
 //! `reqlivo`), o cache é descartável e segredos são referências ao ambiente.
-//! Este crate é compartilhado pela CLI e pela interface web local.
+//! Este crate é compartilhado pela CLI e pela aplicativo desktop Tauri.
 
 pub mod assertions;
 pub mod auth;
 pub mod body;
+pub mod desktop;
 pub mod error;
 pub mod import_export;
 pub mod log;

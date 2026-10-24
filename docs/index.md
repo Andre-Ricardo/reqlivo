@@ -4,7 +4,7 @@ title: Reqlivo
 
 # Suas APIs. Seus arquivos.
 
-O **Reqlivo** é um cliente de APIs open source que funciona localmente, sem criar conta. Organize requisições em arquivos, execute pela CLI ou pela interface web local e acompanhe os resultados dos testes.
+O **Reqlivo** é um cliente de APIs open source que funciona localmente, sem criar conta. Organize requisições em arquivos, execute pela CLI ou pela interface desktop Tauri e acompanhe os resultados dos testes.
 
 Inspirado no [Insomnia](https://insomnia.rest/) e no [Bruno](https://www.usebruno.com/). Projeto independente, sem afiliação com esses produtos.
 
@@ -19,10 +19,11 @@ git clone https://github.com/Andre-Ricardo/reqlivo.git
 cd reqlivo
 cargo build --release --locked
 ./target/release/reqlivo --collection minha-api init --name "Minha API"
-./target/release/reqlivo --collection minha-api serve
+npm ci
+npm run desktop:dev -- -- --collection minha-api
 ```
 
-Abra **http://127.0.0.1:8787**. A interface é servida pelo próprio binário; não é necessário Node.js nem banco de dados.
+O aplicativo abre uma janela nativa. Consulte [desktop e releases](desktop.md) para os pré-requisitos e instaladores Linux/Windows. Node.js é usado apenas no desenvolvimento/build.
 
 ## Explore a documentação
 
@@ -46,7 +47,7 @@ Em outro:
 
 ```bash
 cargo run -- --collection examples/demo run --env dev
-cargo run -- --collection examples/demo serve
+npm run desktop:dev -- -- --collection examples/demo
 ```
 
 A demonstração usa somente dados sintéticos e um servidor HTTP em loopback. O script registra requisições em `/tmp/reqlivo-demo.jsonl`; use `SYNTH_LOG` para escolher outro caminho cujo diretório já exista.

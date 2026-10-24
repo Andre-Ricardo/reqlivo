@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Janela local do Reqlivo. Sem acesso remoto ou plugins de filesystem/shell.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

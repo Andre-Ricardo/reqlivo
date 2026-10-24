@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Reqlivo",
+  "version": "0.2.0",
+  "identifier": "io.github.andre-ricardo.reqlivo",
+  "build": { "frontendDist": "../src/assets" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [{
+      "label": "main", "title": "Reqlivo", "width": 1440, "height": 960,
+      "minWidth": 1000, "minHeight": 640
+    }],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage", "nsis"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "category": "DeveloperTool",
+    "shortDescription": "Cliente local de APIs",
+    "longDescription": "Cliente de APIs sem conta, com coleções OpenCollection, scripts e runner local.",
+    "windows": { "nsis": { "displayLanguageSelector": false, "languages": ["PortugueseBR"] } }
+  }
+}

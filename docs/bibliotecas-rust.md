@@ -6,9 +6,9 @@ title: Bibliotecas Rust
 
 O [inventário completo](tecnologias.md) contém todas as dependências diretas de produção e de testes, com links para a versão usada e para a documentação mais recente. Esta página orienta a leitura das bibliotecas centrais.
 
-## Axum: API e interface local
+## Axum: protocolo interno
 
-**No projeto:** `src/server.rs` define rotas, estado, respostas JSON e os assets embutidos.
+**No projeto:** `src/server.rs` define rotas, estado e respostas JSON. O adaptador IPC em `src/desktop.rs` executa essas rotas em memória, sem servidor HTTP.
 
 **Documentação oficial consultada:** o extrator `State` lê o estado fornecido ao `Router`; deve preceder os extratores que consomem o corpo. Consulte [Router](https://docs.rs/axum/latest/axum/struct.Router.html) e [State](https://docs.rs/axum/latest/axum/extract/struct.State.html).
 

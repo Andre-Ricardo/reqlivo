@@ -35,11 +35,6 @@ enum Command {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Abre a interface web local.
-    Serve {
-        #[arg(long, default_value_t = 8787)]
-        port: u16,
-    },
     /// Executa a coleção ou um filtro dela.
     Run {
         #[arg(long)]
@@ -138,15 +133,10 @@ async fn execute(cli: Cli) -> reqlivo::Result<i32> {
             } else {
                 println!("Coleção '{}' criada em {}", name, store.root.display());
                 println!(
-                    "Próximo passo: reqlivo --collection {} serve",
+                    "Abra esta pasta no aplicativo Reqlivo ou execute: reqlivo --collection {} validate",
                     store.root.display()
                 );
             }
-            Ok(0)
-        }
-        Command::Serve { port } => {
-            let store = open_collection(&cli.collection)?;
-            reqlivo::server::serve(store, port).await?;
             Ok(0)
         }
         Command::Run {

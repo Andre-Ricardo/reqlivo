@@ -12,11 +12,11 @@ Referências oficiais consultadas em **2026-10-24**, com apoio do **Context7**. 
 
 | Guia | Papel no projeto | Documentação atual |
 |---|---|---|
-| [Rust e Cargo](rust.md) | Núcleo, CLI e servidor | Rust estável **1.99.1** |
+| [Rust e Cargo](rust.md) | Núcleo, CLI e desktop | Rust estável **1.99.1** |
 | [Bibliotecas Rust](bibliotecas-rust.md) | HTTP, runtime, scripts, contratos e CLI | Links `latest` e versões fixadas abaixo |
 | [Web, Python e formatos](web-e-formatos.md) | Interface, demonstração, coleção e site | Referências correntes oficiais |
-| [Node.js](nodejs.md) | Referência solicitada; não utilizado pelo MVP | Current **v26.12.1**; LTS **v24.22.1** |
-| [Tauri](tauri.md) | Referência solicitada; não integrado | Crate `tauri` estável **2.12.5**, documentação Tauri 2 |
+| [Node.js](nodejs.md) | CLI Tauri no desenvolvimento/build | Current **v26.12.1**; LTS **v24.22.1** |
+| [Tauri](tauri.md) | Shell desktop e instaladores | Crate `tauri` estável **2.12.5**, documentação Tauri 2 |
 | [Atualização com Context7](context7.md) | Procedimento de manutenção das referências | IDs e consultas rastreáveis |
 
 ## O que significa “mais recente”
@@ -25,7 +25,9 @@ As versões acima e abaixo são uma fotografia da consulta. Para Rust foi usado 
 
 Os links `latest`, `stable` e de documentação corrente acompanham atualizações upstream. O conteúdo indexado no Context7 pode ter defasagem ou incluir páginas históricas; por isso os guias apontam também para os sites oficiais. Uma versão nova pode não corresponder à API implementada no Reqlivo.
 
-Esta atualização é documental. `Cargo.toml`, `Cargo.lock` e o comportamento do aplicativo permanecem nas versões do projeto. Edição Rust 2024 e mínimo declarado 1.85 são informações diferentes da última versão estável do compilador.
+O inventário abaixo registra o snapshot documental anterior à migração desktop. As dependências adicionais Tauri e o papel atual do Node.js estão em [desktop.md](desktop.md) e nos manifestos. Esta tabela não é um inventário completo do workspace desktop.
+
+Na consulta original, a atualização foi documental. `Cargo.toml`, `Cargo.lock` e o comportamento do aplicativo permanecem nas versões do projeto. Edição Rust 2024 e mínimo declarado 1.85 são informações diferentes da última versão estável do compilador.
 
 ## Dependências diretas
 
@@ -33,7 +35,7 @@ Todas as **22 dependências diretas** estão listadas: 20 de produção e 2 de t
 
 | Biblioteca | Fixada no projeto | Estável mais recente | Função | Documentação |
 |---|---|---|---|---|
-| `axum` | 0.8.9 | 0.8.9 | Servidor HTTP e API da interface (produção) | [fixada](https://docs.rs/axum/0.8.9/) · [mais recente](https://docs.rs/axum/latest/) |
+| `axum` | 0.8.9 | 0.8.9 | Protocolo de operações em memória (produção) | [fixada](https://docs.rs/axum/0.8.9/) · [mais recente](https://docs.rs/axum/latest/) |
 | `base64` | 0.22.1 | 0.23.1 | Autenticação Basic e dados binários (produção) | [fixada](https://docs.rs/base64/0.22.1/) · [mais recente](https://docs.rs/base64/latest/) |
 | `chrono` | 0.4.45 | 0.4.45 | Datas e horários (produção) | [fixada](https://docs.rs/chrono/0.4.45/) · [mais recente](https://docs.rs/chrono/latest/) |
 | `clap` | 4.6.7 | 4.6.7 | Parser e ajuda da CLI (produção) | [fixada](https://docs.rs/clap/4.6.7/) · [mais recente](https://docs.rs/clap/latest/) |
@@ -54,7 +56,7 @@ Todas as **22 dependências diretas** estão listadas: 20 de produção e 2 de t
 | `url` | 2.5.8 | 2.5.8 | Análise e composição de URLs (produção) | [fixada](https://docs.rs/url/2.5.8/) · [mais recente](https://docs.rs/url/latest/) |
 | `uuid` | 1.26.1 | 1.29.0 | Identificadores (produção) | [fixada](https://docs.rs/uuid/1.26.1/) · [mais recente](https://docs.rs/uuid/latest/) |
 | `tempfile` | 3.27.0 | 3.27.0 | Diretórios temporários de testes (teste) | [fixada](https://docs.rs/tempfile/3.27.0/) · [mais recente](https://docs.rs/tempfile/latest/) |
-| `tower` | 0.5.3 | 0.5.3 | Utilitários de serviço nos testes da API (teste) | [fixada](https://docs.rs/tower/0.5.3/) · [mais recente](https://docs.rs/tower/latest/) |
+| `tower` | 0.5.3 | 0.5.3 | Dispatcher em memória e testes (produção) | [fixada](https://docs.rs/tower/0.5.3/) · [mais recente](https://docs.rs/tower/latest/) |
 
 Dependências transitivas não são apresentadas como decisões diretas da arquitetura; suas versões completas continuam registradas em `Cargo.lock`.
 

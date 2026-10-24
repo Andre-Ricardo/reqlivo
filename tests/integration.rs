@@ -717,10 +717,8 @@ async fn postman_import_preserves_scripts_as_loss_warning() {
 }
 
 #[tokio::test]
-async fn server_send_can_be_cancelled_with_client_supplied_id() {
-    use axum::body::Body;
-    use axum::http::{Request, StatusCode};
-    use tower::ServiceExt;
+async fn desktop_send_can_be_cancelled_with_client_supplied_id() {
+    use reqlivo::desktop::dispatch;
 
     let http = start_test_http().await;
     let (_dir, mut store) = test_collection(&http.base);
@@ -728,44 +726,27 @@ async fn server_send_can_be_cancelled_with_client_supplied_id() {
         .create_request(None, "Lenta", "GET", "{{baseUrl}}/slow")
         .unwrap();
     let state = AppState::new(store);
-    let app = server::router(state);
     let send_id = format!("send_{}", "a".repeat(16));
-    let body = json!({
-        "sendId": send_id,
-        "requestId": payload.id,
-        "environment": "dev"
-    });
-    let send = app.clone().oneshot(
-        Request::builder()
-            .method("POST")
-            .uri("/api/send")
-            .header("content-type", "application/json")
-            .body(Body::from(body.to_string()))
-            .unwrap(),
-    );
+    let body = json!({ "sendId": send_id, "requestId": payload.id, "environment": "dev" });
+    let send = dispatch(state.clone(), "/api/send".into(), "POST".into(), Some(body));
     let cancel_id = send_id.clone();
     let cancel = async move {
         tokio::time::sleep(Duration::from_millis(40)).await;
-        app.oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/api/send/{cancel_id}/cancel"))
-                .body(Body::empty())
-                .unwrap(),
+        dispatch(
+            state,
+            format!("/api/send/{cancel_id}/cancel"),
+            "POST".into(),
+            None,
         )
         .await
         .unwrap()
     };
     let (send_response, cancel_response) = tokio::join!(send, cancel);
     let send_response = send_response.unwrap();
-    assert_eq!(cancel_response.status(), StatusCode::OK);
-    assert_eq!(send_response.status(), StatusCode::OK);
-    let bytes = axum::body::to_bytes(send_response.into_body(), 1024 * 1024)
-        .await
-        .unwrap();
-    let value: Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(value["run"]["status"], "cancelled");
-    assert_eq!(value["sendId"], send_id);
+    assert_eq!(cancel_response.status, 200);
+    assert_eq!(send_response.status, 200);
+    assert_eq!(send_response.data["run"]["status"], "cancelled");
+    assert_eq!(send_response.data["sendId"], send_id);
 }
 
 #[tokio::test]

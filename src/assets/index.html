@@ -3,7 +3,6 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; base-uri 'none'; form-action 'none'">
   <title>Reqlivo</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -19,6 +18,7 @@
       </span>
     </div>
     <div class="topbar-actions">
+      <button type="button" id="openCollectionBtn" class="btn">Abrir coleção</button>
       <label class="env-picker" for="environment">
         <span>Ambiente</span>
         <select id="environment" aria-label="Ambiente ativo"></select>
@@ -258,7 +258,7 @@
       </div>
       <div class="dialog-actions">
         <button type="button" id="doExportBtn" class="btn btn-primary">Exportar</button>
-        <button type="button" id="downloadExportBtn" class="btn" hidden>Baixar conteúdo</button>
+        <button type="button" id="downloadExportBtn" class="btn" hidden>Salvar conteúdo</button>
       </div>
       <div id="exportResult" class="report-box" hidden></div>
       <label class="field-label" for="exportContent">Conteúdo exportado</label>

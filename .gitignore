@@ -13,3 +13,8 @@ docs/_site/
 docs/.jekyll-cache/
 __pycache__/
 *.pyc
+
+# Desktop Tauri
+/node_modules/
+/src-tauri/target/
+/src-tauri/gen/
