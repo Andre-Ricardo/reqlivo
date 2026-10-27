@@ -4,7 +4,7 @@ title: Tauri
 
 # Tauri
 
-**Referência solicitada; não está integrado ao MVP.** O projeto atual serve sua interface pelo Axum em loopback. Não há diretório `src-tauri`, configuração Tauri nem dependência `tauri` no manifesto.
+**Integrado ao aplicativo desktop.** O workspace contém `src-tauri`, configuração Tauri 2, capability da janela local e comandos IPC. Consulte [desktop e releases](desktop.md) para arquitetura, pré-requisitos e validação.
 
 ## Documentação oficial atual
 
@@ -19,11 +19,9 @@ title: Tauri
 
 A versão exata mais recente do crate está no [catálogo](tecnologias.md). Os pacotes Rust, CLI, plugins e pacotes JavaScript têm versões próprias; o número do crate `tauri` não identifica automaticamente a versão de todos eles.
 
-## Orientação para uma possível integração
+## Integração atual
 
-O modelo de processos documentado separa o core das WebViews. O sistema de capabilities delimita o acesso do frontend às funcionalidades expostas. Uma futura integração do Reqlivo precisaria definir os comandos e permissões necessários, o empacotamento e a política de acesso local, além de testar cada plataforma suportada.
-
-As referências acima são material de estudo. Elas não representam uma migração aprovada ou uma funcionalidade já implementada.
+A interface usa `window.__TAURI__.core.invoke` e assets empacotados. O núcleo Rust mantém transporte, scripts, persistência e runner. Não há servidor HTTP da interface. A capability permite apenas a janela local; seleção de pasta, confirmações e salvamento usam diálogos Rust. Linux e Windows são os alvos de build.
 
 ## Consulta Context7
 

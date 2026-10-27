@@ -34,7 +34,8 @@ relatório, no histórico, nos logs ou nas exportações padrão.
 Para abrir a interface:
 
 ```bash
-./target/debug/reqlivo --collection examples/demo serve --port 18787
+npm ci
+npm run desktop:dev -- -- --collection examples/demo
 ```
 
 Acesse `http://127.0.0.1:18787`.

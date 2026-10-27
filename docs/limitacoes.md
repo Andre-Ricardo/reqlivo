@@ -28,7 +28,7 @@ O Reqlivo está em nível **MVP funcional**. As limitações abaixo são intenci
 - Apenas `provider: env` está implementado. `system` e `file` existem no modelo, mas não resolvem.
 - Valores literais em auth/headers/query são permitidos no projeto, mas a UI avisa e a exportação padrão os omite. Não há scanner de segredos em corpos livres.
 - A redaction cobre nomes/valores conhecidos, variáveis secretas e padrões de logs/relatórios. Conteúdo arbitrário em corpo de resposta ou script só é mascarado quando contém um valor secreto conhecido.
-- O servidor web escuta apenas em loopback e não tem autenticação. Não exponha a porta em redes públicas.
+- A UI opera por IPC local Tauri. Não existe servidor HTTP da interface.
 - Não há criptografia em repouso para `.reqlivo/`; o diretório deve ser protegido pelo sistema operacional e ignorado pelo Git.
 - A exportação de projeto é sanitizada e reescrita; não é um espelho byte a byte. Para preservar comentários e formatação, use o diretório original.
 - Arquivos extras do projeto (README, notas) são copiados sem inspeção de segredos; apenas os campos modelados são sanitizados.
@@ -36,7 +36,7 @@ O Reqlivo está em nível **MVP funcional**. As limitações abaixo são intenci
 ## Persistência e edição
 
 - Não há watcher de arquivos. A UI recarrega sob demanda e detecta conflito de revisão ao salvar; não pergunta automaticamente a cada mudança externa.
-- Não há autosave de rascunho. Fechar a aba usa o aviso nativo do navegador; recarregar a página descarta o rascunho não salvo.
+- Não há autosave de rascunho. O fechamento da janela exige confirmação quando há alterações; recarregar descarta o rascunho não salvo.
 - A lixeira é um diretório em `.reqlivo/trash/`; não há UI de restauração.
 - Migrações fazem backup e aviso, mas o rollback é manual.
 - A edição simultânea por múltiplos processos não é coordenada além da revisão no momento do save.
@@ -54,7 +54,7 @@ O Reqlivo está em nível **MVP funcional**. As limitações abaixo são intenci
 
 - O runner executa sequencialmente; não há paralelismo configurável.
 - Filtros são por tags, IDs de requisição e uma pasta; não há expressão booleana.
-- O histórico mantém as últimas execuções em `.reqlivo/history/runs.jsonl` e os 30 relatórios mais recentes em memória no servidor.
+- O histórico mantém as últimas execuções em `.reqlivo/history/runs.jsonl` e os 30 relatórios mais recentes em memória no aplicativo.
 - Cancelamento interrompe transporte/scripts em andamento, mas não desfaz efeitos colaterais já enviados ao servidor de destino.
 - O envio interativo só pode ser cancelado com o ID gerado pelo cliente; a UI já faz isso.
 
@@ -68,11 +68,17 @@ O Reqlivo está em nível **MVP funcional**. As limitações abaixo são intenci
 
 ## Decisões técnicas relevantes
 
-- **Um crate Rust** com biblioteca + binário. A UI é embutida via `include_str!` e servida por Axum; não há Tauri nem dependência de Node/WebKit para rodar.
+- **Workspace Rust**: biblioteca/CLI e aplicativo Tauri 2. HTML/CSS/JavaScript são empacotados na WebView. O roteador Axum é usado em memória para preservar os contratos; não abre sockets. Linux usa WebKitGTK 4.1 e Windows usa WebView2.
 - **OpenCollection** como fonte de verdade, com `extensions.reqlivo` para IDs, settings, segredos e metadados do Reqlivo.
 - **QuickJS** (`rquickjs`) em vez de Node: sandbox menor, timeout por interrupção e superfície controlada.
 - **Sem conta** por princípio: toda a operação essencial é local e não depende de rede externa.
-- **Loopback apenas**: reduz superfície de ataque e evita transformar o MVP em servidor remoto sem autenticação.
+- **IPC local**: a WebView não faz chamadas diretas às APIs de destino.
+
+## Distribuição desktop
+
+- Linux x86_64 e Windows x86_64 são os alvos iniciais. Sem macOS ou ARM.
+- Instaladores não possuem assinatura de código; atualização automática não está implementada.
+- Build automatizado não substitui validação interativa em cada sistema. Consulte [desktop.md](desktop.md).
 
 ## Próximos marcos sugeridos
 

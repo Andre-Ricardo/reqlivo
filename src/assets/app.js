@@ -90,25 +90,22 @@ function toast(message, kind = 'ok', timeout = 4200) {
 }
 
 async function api(path, options = {}) {
-  const init = { method: options.method || 'GET', headers: {} };
-  if (options.body !== undefined) {
-    init.headers['content-type'] = 'application/json';
-    init.body = JSON.stringify(options.body);
-  }
-  const response = await fetch(path, init);
-  const text = await response.text();
-  let data = null;
-  if (text) {
-    try { data = JSON.parse(text); } catch (_) { data = text; }
-  }
-  if (!response.ok) {
+  if (!window.__TAURI__) throw new Error('Abra o Reqlivo pelo aplicativo desktop.');
+  const { status, data } = await window.__TAURI__.core.invoke('api_request', {
+    path, method: options.method || 'GET', body: options.body ?? null,
+  });
+  if (status < 200 || status >= 300) {
     const info = data && data.error ? data.error : null;
-    const error = new Error(info ? info.message : `${response.status} ${response.statusText}`);
+    const error = new Error(info ? info.message : `${status}: ${data || 'operação recusada'}`);
     error.info = info;
-    error.status = response.status;
+    error.status = status;
     throw error;
   }
   return data;
+}
+
+async function confirmAction(message) {
+  return window.__TAURI__.core.invoke('confirm_action', { message });
 }
 
 function encode(value) {
@@ -151,6 +148,14 @@ function currentSettings() {
 
 document.addEventListener('DOMContentLoaded', () => {
   bindStaticEvents();
+  $('#openCollectionBtn').addEventListener('click', openCollection);
+  window.__TAURI__.window.getCurrentWindow().onCloseRequested(async (event) => {
+    if (!state.dirty) return;
+    event.preventDefault();
+    if (await confirmAction('Descartar alterações não salvas e fechar o Reqlivo?')) {
+      await window.__TAURI__.core.invoke('close_window');
+    }
+  }).catch((error) => toast(String(error), 'error'));
   loadAll().catch((error) => {
     showFatal(error);
   });
@@ -201,7 +206,7 @@ function showFatal(error) {
     node('p', { class: 'eyebrow' }, 'Falha ao abrir a coleção'),
     node('h1', {}, 'Não foi possível carregar o Reqlivo'),
     node('p', {}, error.message),
-    node('p', { class: 'muted' }, 'Verifique se o diretório contém opencollection.yml e recarregue a página.'),
+    node('p', { class: 'muted' }, 'Verifique se o diretório contém opencollection.yml e abra outra coleção pelo botão Abrir coleção.'),
     node('div', { class: 'empty-actions' },
       node('button', { class: 'btn btn-primary', type: 'button', onclick: () => window.location.reload() }, 'Recarregar'),
     ),
@@ -475,7 +480,7 @@ function handleTreeKeydown(event) {
 /* ------------------------------------------------------------------------- */
 
 async function openRequest(id, force = false) {
-  if (!force && state.dirty && !window.confirm('Há alterações não salvas. Descartar e abrir outra requisição?')) {
+  if (!force && state.dirty && !await confirmAction('Há alterações não salvas. Descartar e abrir outra requisição?')) {
     return;
   }
   const view = await api(`/api/requests/${encode(id)}`);
@@ -1341,7 +1346,7 @@ async function renameFolder(folder) {
 }
 
 async function deleteFolder(folder) {
-  if (!window.confirm(`Mover a pasta “${folder.name}” e seu conteúdo para a lixeira?`)) return;
+  if (!await confirmAction(`Mover a pasta “${folder.name}” e seu conteúdo para a lixeira?`)) return;
   try {
     await api(`/api/folders/${encode(folder.id)}`, { method: 'DELETE' });
     await refreshSnapshot();
@@ -1352,7 +1357,7 @@ async function deleteFolder(folder) {
 }
 
 async function deleteRequest(id) {
-  if (!window.confirm('Mover a requisição para a lixeira? O arquivo permanece recuperável em .reqlivo/trash.')) return;
+  if (!await confirmAction('Mover a requisição para a lixeira? O arquivo permanece recuperável em .reqlivo/trash.')) return;
   try {
     await api(`/api/requests/${encode(id)}`, { method: 'DELETE' });
     if (state.current?.id === id) {
@@ -1607,21 +1612,23 @@ async function runExport() {
   }
 }
 
-function downloadExport() {
+async function downloadExport() {
   if (!state.exportContent) return;
-  const format = $('#exportFormat').value;
-  const names = {
-    curl: state.current ? `${state.current.request.info.name || 'requisicao'}.sh` : 'requisicao.sh',
-    postman: 'reqlivo.postman.json',
-    opencollection: 'reqlivo.opencollection.yml',
-  };
-  const blob = new Blob([state.exportContent], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = node('a', { href: url, download: names[format] || 'export.txt' });
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  try {
+    const saved = await window.__TAURI__.core.invoke('save_export', { content: state.exportContent });
+    if (saved) toast('Exportação salva.');
+  } catch (error) { toast(String(error), 'error'); }
+}
+
+async function openCollection() {
+  if (state.sendId || state.runId) {
+    toast('Conclua ou cancele a execução antes de trocar de coleção.', 'warn');
+    return;
+  }
+  if (state.dirty && !await confirmAction('Descartar alterações não salvas e abrir outra coleção?')) return;
+  try {
+    if (await window.__TAURI__.core.invoke('open_collection')) window.location.reload();
+  } catch (error) { toast(String(error), 'error', 7000); }
 }
 
 function renderReport(box, report, title) {
@@ -1839,7 +1846,7 @@ async function deleteEnvironment() {
     toast('Selecione um ambiente existente.', 'warn');
     return;
   }
-  if (!window.confirm(`Excluir o ambiente “${editing.originalName}”?`)) return;
+  if (!await confirmAction(`Excluir o ambiente “${editing.originalName}”?`)) return;
   try {
     await api(`/api/environments/${encode(editing.originalName)}`, { method: 'DELETE' });
     if (state.environment === editing.originalName) {
@@ -2144,12 +2151,7 @@ function bindStaticEvents() {
     }
   });
 
-  window.addEventListener('beforeunload', (event) => {
-    if (state.dirty) {
-      event.preventDefault();
-      event.returnValue = '';
-    }
-  });
+
 
   // Acesso adicional às configurações a partir do diálogo de ambientes.
   const envDialogBody = $('#envDialog .dialog-body');

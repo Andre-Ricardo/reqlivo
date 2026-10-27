@@ -24,6 +24,8 @@ cargo run -- --collection examples/demo validate
 
 Para testar a demonstração, inicie `python3 examples/servidor_demo.py` em outro terminal e execute `cargo run -- --collection examples/demo run --env dev`.
 
+Para o desktop, instale os pré-requisitos em [desktop.md](docs/desktop.md), execute `npm ci` e `npm run desktop:dev`. O CI compila e empacota Linux/Windows.
+
 Consulte o [guia de uso](docs/uso.md), o [formato da coleção](docs/formato.md) e as [limitações](docs/limitacoes.md) antes de propor funcionalidades maiores.
 
 ## Licença das contribuições

@@ -4,7 +4,7 @@ title: Node.js
 
 # Node.js
 
-**Referência solicitada; não é dependência do MVP.** O Reqlivo atual não possui `package.json`, pipeline npm nem servidor Node.js. A interface usa JavaScript no navegador e os scripts de requisição são executados por rquickjs. As APIs de Node.js não fazem parte de `rq.*`.
+**No projeto:** Node.js 22 e npm executam o CLI Tauri no desenvolvimento e build, com `package.json` e `package-lock.json`. O aplicativo instalado não inicia um servidor Node.js. Os scripts de requisição continuam no rquickjs; APIs Node.js não fazem parte de `rq.*`.
 
 ## Documentação oficial atual
 
@@ -21,7 +21,7 @@ O catálogo registra separadamente a versão corrente e a LTS consultadas. Esses
 
 ## Se for adotado futuramente
 
-Uma adoção de Node.js deve definir sua finalidade, versão, manifesto, lockfile e comandos de build. O uso de uma ferramenta de frontend não implica que o produto precise executar um servidor Node.js. Essa integração ainda precisaria de implementação e validação próprias.
+Uma adoção de Node.js deve definir sua finalidade, versão, manifesto, lockfile e comandos de build. O uso de uma ferramenta de frontend não implica que o produto precise executar um servidor Node.js. Os comandos atuais estão em [desktop.md](desktop.md).
 
 Na consulta oficial via Context7, `process.env` aparece nas variantes ESM e CommonJS. Essa informação serve para ferramentas Node.js; o acesso a segredos pelo Reqlivo continua seguindo seu [próprio contrato](formato.md).
 

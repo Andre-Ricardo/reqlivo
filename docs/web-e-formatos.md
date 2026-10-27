@@ -6,7 +6,7 @@ title: Web, Python e formatos
 
 ## JavaScript, HTML e CSS
 
-**Observado estaticamente:** a interface em `src/assets/` usa HTML, CSS e JavaScript sem framework. Os assets são incorporados ao binário por `include_str!` em `src/server.rs`. O navegador e o runtime de scripts de requisição são contextos diferentes.
+**Observado estaticamente:** a interface em `src/assets/` usa HTML, CSS e JavaScript sem framework. Os assets são empacotados pelo Tauri, conforme `src-tauri/tauri.conf.json`. A WebView e o runtime de scripts de requisição são contextos diferentes.
 
 Referências correntes:
 

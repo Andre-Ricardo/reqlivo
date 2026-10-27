@@ -4,7 +4,7 @@ title: Guia de uso
 
 # Uso
 
-Este guia cobre o fluxo diário da CLI e da interface web do Reqlivo. Para o formato dos arquivos, consulte [formato.md](formato.md).
+Este guia cobre o fluxo diário da CLI e da interface desktop do Reqlivo. Para o formato dos arquivos, consulte [formato.md](formato.md).
 
 ## Instalação e build
 
@@ -26,12 +26,13 @@ O comando cria `opencollection.yml`, `README.md`, `.gitignore` e o ambiente `dev
 Abra a interface:
 
 ```bash
-reqlivo --collection minha-api serve
+npm ci
+npm run desktop:dev -- -- --collection minha-api
 ```
 
-O padrão é `127.0.0.1:8787`. Use `--port` para trocar. O servidor não aceita bind em interfaces externas e recusa requisições com `Host` não loopback.
+Consulte [desktop.md](desktop.md) para pré-requisitos e instaladores. **Abrir coleção** seleciona a pasta pelo diálogo nativo. Sem argumentos, o app reabre a última pasta selecionada ou cria uma coleção nos dados locais do aplicativo. Não há servidor da interface nem comando `serve`.
 
-## Interface web
+## Interface desktop
 
 ### Árvore e editor
 
@@ -84,7 +85,7 @@ Abra **Ambientes** no topo. É possível:
 - informar a chave de ambiente do processo (por exemplo, `REQLIVO_API_TOKEN`);
 - definir o ambiente padrão.
 
-A UI mostra apenas `definido`/`não definido` para a referência. O valor real nunca é enviado ao navegador.
+A UI mostra apenas `definido`/`não definido` para a referência. O valor real nunca é enviado à WebView.
 
 ### Configurações
 
@@ -189,7 +190,7 @@ Endpoints usados: `/echo`, `/status/404`. O servidor grava requisições em `$SY
 
 ## JSON e integração
 
-Use `--json` para automação. Os corpos da API web usam `camelCase`; os relatórios do runner e os objetos de domínio usam `snake_case`, refletindo o modelo canônico.
+Use `--json` para automação. Os corpos da ponte IPC usam `camelCase`; os relatórios do runner e os objetos de domínio usam `snake_case`, refletindo o modelo canônico.
 
 ## Offline
 

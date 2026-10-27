@@ -1,8 +1,5 @@
-//! Servidor HTTP local e API consumida pela interface web embutida.
-//!
-//! A interface e o servidor escutam apenas em loopback por padrão. Nenhum
-//! valor secreto é devolvido pela API: variáveis secretas aparecem apenas
-//! como referências e o runner serializa valores mascarados.
+//! Protocolo interno da aplicação, executado em memória pelo adaptador IPC.
+//! Não abre sockets nem serve a interface. Mantém os contratos do núcleo.
 
 use crate::error::{Error, ErrorInfo};
 use crate::import_export::{self, ExportFormat, ImportFormat};
@@ -15,7 +12,7 @@ use crate::store::{CollectionSnapshot, CollectionStore, RequestPayload};
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -26,10 +23,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
-
-const INDEX_HTML: &str = include_str!("assets/index.html");
-const APP_JS: &str = include_str!("assets/app.js");
-const STYLES_CSS: &str = include_str!("assets/styles.css");
 
 #[derive(Clone)]
 pub struct AppState {
@@ -42,6 +35,12 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub async fn cancel_all(&self) {
+        for token in self.tokens.lock().await.values() {
+            token.cancel();
+        }
+    }
+
     pub fn new(store: CollectionStore) -> Self {
         let root = store.root.clone();
         Self {
@@ -65,9 +64,6 @@ pub enum StoredRun {
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route("/", get(index))
-        .route("/app.js", get(app_js))
-        .route("/styles.css", get(styles_css))
         .route("/api/health", get(health))
         .route("/api/collection", get(snapshot))
         .route("/api/collection/reload", post(reload))
@@ -141,21 +137,6 @@ fn host_name(value: &str) -> &str {
         .unwrap_or(value)
 }
 
-/// Sobe o servidor em uma interface loopback.
-pub async fn serve(store: CollectionStore, port: u16) -> crate::Result<()> {
-    let state = AppState::new(store);
-    let app = router(state);
-    let address = format!("127.0.0.1:{port}");
-    let listener = tokio::net::TcpListener::bind(&address)
-        .await
-        .map_err(|error| Error::Config(format!("não foi possível abrir {address}: {error}")))?;
-    println!("Reqlivo disponível em http://{address}");
-    println!("Pressione Ctrl+C para encerrar.");
-    axum::serve(listener, app)
-        .await
-        .map_err(|error| Error::Internal(format!("servidor encerrado: {error}")))
-}
-
 // ---------------------------------------------------------------------------
 // Erros da API
 // ---------------------------------------------------------------------------
@@ -183,26 +164,8 @@ impl IntoResponse for ApiError {
 type ApiResult<T> = std::result::Result<Json<T>, ApiError>;
 
 // ---------------------------------------------------------------------------
-// Interface embutida
+// Rota desconhecida
 // ---------------------------------------------------------------------------
-
-async fn index() -> Html<&'static str> {
-    Html(INDEX_HTML)
-}
-
-async fn app_js() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        APP_JS,
-    )
-}
-
-async fn styles_css() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        STYLES_CSS,
-    )
-}
 
 async fn fallback() -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "recurso não encontrado")
