@@ -7,7 +7,7 @@ Cliente de APIs **local-first**, sem conta e baseado em arquivos. O Reqlivo lê 
 
 [Documentação](https://andre-ricardo.github.io/reqlivo/) · [Contribuir](CONTRIBUTING.md) · [Reportar problema](https://github.com/Andre-Ricardo/reqlivo/issues)
 
-> Estado atual: **MVP funcional com persistência e edição recuperável (0.3.0)**. O escopo implementado e as lacunas conhecidas estão em [docs/mvp.md](docs/mvp.md) e [docs/limitacoes.md](docs/limitacoes.md). A [release 0.3.0](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) está publicada com instaladores Linux/Windows e `SHA256SUMS`; a validação automatizada Linux/Windows passou, mas a matriz manual de desktop e a auditoria com leitor de tela seguem pendentes. Detalhes em [docs/proxima-release/resultado-validacao.md](docs/proxima-release/resultado-validacao.md).
+> Estado atual: **MVP funcional com persistência e edição recuperável (0.3.0)**. O escopo implementado e as lacunas conhecidas estão em [docs/mvp.md](docs/mvp.md) e [docs/limitacoes.md](docs/limitacoes.md). A [release 0.3.0](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) está publicada com instaladores Linux/Windows e `SHA256SUMS`; a validação automatizada Linux/Windows passou, e uma matriz de 11 casos no desktop real (Linux/WebKitGTK) mais o benchmark de 1.000 requisições foram executados. A matriz manual no Windows, a instalação limpa e a auditoria com leitor de tela seguem pendentes. Detalhes em [docs/proxima-release/resultado-validacao.md](docs/proxima-release/resultado-validacao.md).
 
 ## O que está pronto
 

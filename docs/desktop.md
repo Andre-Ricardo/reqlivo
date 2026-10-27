@@ -92,7 +92,7 @@ git tag v0.3.0
 git push origin v0.3.0
 ```
 
-Para uma versão posterior, atualize os cinco manifestos (`Cargo.toml`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `package.json` e `package-lock.json`) e as entradas dos pacotes próprios em `Cargo.lock`; gere o lock npm com `npm install --package-lock-only` quando necessário. Confira a consistência antes de criar a tag. A versão 0.3.0 foi publicada em 2026-10-27 na tag `v0.3.0`: o workflow remoto passou em Linux e Windows, publicou os três instaladores e o `SHA256SUMS`, e a [release](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) foi verificada. A instalação manual em máquinas limpas e a matriz manual de desktop continuam pendentes.
+Para uma versão posterior, atualize os cinco manifestos (`Cargo.toml`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `package.json` e `package-lock.json`) e as entradas dos pacotes próprios em `Cargo.lock`; gere o lock npm com `npm install --package-lock-only` quando necessário. Confira a consistência antes de criar a tag. A versão 0.3.0 foi publicada em 2026-10-27 na tag `v0.3.0`: o workflow remoto passou em Linux e Windows, publicou os três instaladores e o `SHA256SUMS`, e a [release](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) foi verificada. A instalação manual em máquinas limpas e a matriz manual no Windows continuam pendentes; a matriz automatizada Linux em WebView real foi executada e está descrita abaixo.
 
 ## Validação e lacunas
 
@@ -104,7 +104,25 @@ Os testes da ponte IPC verificam criação/persistência/reabertura/exclusão, e
 
 ![Aplicativo Tauri no Linux com a coleção sintética](assets/reqlivo-desktop-linux.png)
 
-Validação interativa ainda necessária em cada plataforma: primeiro uso, seleção/cancelamento de pasta, editar/salvar/enviar, autosave e recuperação de rascunho, alteração externa com comparação, lixeira, confirmação/rollback de migração, cancelar execução, importar/exportar e fechar janela com rascunho. Build automatizado não equivale a teste visual ou execução de instalador. A execução local do desktop depende da instalação de GTK/WebKit no ambiente de desenvolvimento.
+Validação manual ainda necessária em cada plataforma: primeiro uso, seleção/cancelamento de pasta, importar/exportar por diálogo, fechar janela com rascunho, inspeção visual do instalador e auditoria com leitor de tela. A matriz automatizada abaixo já cobre abertura/envio, autosave e recuperação após reinício, guardião, alteração externa e comparação, YAML inválido, lixeira, manifesto de ambiente, cursor antigo, foco/teclado, cancelamento de envio e migração/rollback. Build automatizado não equivale a teste visual ou execução de instalador. A execução local do desktop depende da instalação de GTK/WebKit no ambiente de desenvolvimento.
+
+## Matriz automatizada em WebView real (Linux)
+
+O script [desktop-acceptance.mjs](../scripts/desktop-acceptance.mjs) abre o **binário de release** `target/release/reqlivo-desktop` em uma WebView WebKitGTK real, por `tauri-driver` e `WebKitWebDriver`, sem servidor de desenvolvimento. Ele cria cópias descartáveis de `examples/demo`, sobe um servidor HTTP sintético em loopback, executa os casos e grava relatório, JSON e capturas em `../evidencias/reqlivo-v0.3.0/desktop/`.
+
+Pré-requisitos locais: Linux com Xvfb/X11, `tauri-driver`, `WebKitWebDriver`, `xwininfo`, `dbus-run-session`, Python com ligações X11/XTest e o binário de release compilado (`cargo build --release -p reqlivo-desktop`). O driver e o servidor são iniciados e encerrados pelo próprio script. A variável `DESKTOP_ONLY` permite executar um caso isolado, por exemplo `DESKTOP_ONLY=D-01`.
+
+```bash
+WEBKIT_WEBDRIVER=/caminho/WebKitWebDriver \
+DESKTOP_WEBKIT_VERSION=2.52.6 \
+node scripts/desktop-acceptance.mjs
+```
+
+A execução de 2026-10-27 usou Ubuntu 26.04.1, `tauri-driver` 2.0.6, WebKitWebDriver 2.52.6 e Xvfb `:99` (1600×1000×24, sem gerenciador de janelas), com o binário SHA-256 `a34ded160203dcd5a27cfadc57f19e5ee491b80e38eecff652f414cb52e98919`. Resultado: **11/11 casos aprovados** (D-01 a D-11), sem falhas. O helper [x11-dialog-ok.py](../scripts/x11-dialog-ok.py) clica no “OK” dos diálogos nativos GTK via X11/XTest; ele é ferramenta de teste e não substitui uma auditoria de acessibilidade.
+
+Evidências: [relatório](../../evidencias/reqlivo-v0.3.0/desktop/desktop-acceptance.txt), [JSON](../../evidencias/reqlivo-v0.3.0/desktop/desktop-acceptance.json) e [capturas](../../evidencias/reqlivo-v0.3.0/desktop/).
+
+A matriz não cobre: seleção/cancelamento de pasta pelo diálogo nativo, importação/exportação por diálogo, fechamento da janela com rascunho, troca real entre coleções pelo seletor nativo, leitor de tela/WCAG, Windows e instalação em máquina limpa. D-08 usa um cursor de geração simulado, não uma troca real de coleção.
 
 ## Referências consultadas
 

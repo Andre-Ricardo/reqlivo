@@ -69,13 +69,13 @@ Legenda: **Entregue** = há implementação e teste automatizado ou validação 
 | AC-11 — 404 sem teste | Entregue | Status `executed`, HTTP 404 visível. |
 | AC-12 — runner determinístico | Entregue | `deterministic_hash_is_stable_across_runs`. |
 | AC-13 — persistência/reabertura | Entregue | Store lê/grava YAML; testes de importação/projeto reabrem a coleção. |
-| AC-14 — rascunho não salvo | Parcial | Autosave, recuperação, órfãos e guardião implementados e testados no núcleo/IPC e em fluxos headless; validação no desktop real pendente. |
-| AC-15 — edição externa | Parcial | Hash/geração, recarga assistida, conflito 409 e comparação com o disco; a UI consulta ao focar/ficar visível, sem watcher nativo. Validação desktop pendente. |
+| AC-14 — rascunho não salvo | Parcial | Autosave, recuperação, órfãos e guardião implementados e testados no núcleo/IPC, em fluxos headless e em D-02/D-03 na WebView real; matriz manual no Windows pendente. |
+| AC-15 — edição externa | Parcial | Hash/geração, recarga assistida, conflito 409 e comparação com o disco; a UI consulta ao focar/ficar visível, sem watcher nativo. D-04/D-05/D-07/D-08 cobrem a WebView real; Windows pendente. |
 | AC-16 — importação com perdas | Entregue | Relatório de contagem/avisos/perdas; scripts Postman não executam. |
 | AC-17 — exportação segura | Entregue | Auth/headers/query/variáveis sensíveis literais omitidos; projeto sanitizado; conteúdo da lixeira não é exportado. |
 | AC-18 — modo offline | Entregue | Bloqueio antes da conexão e em redirects; testes de offline. |
-| AC-19 — migração | Parcial | Inspeção, confirmação, backup, hashes, rollback e recuperação implementados/testados no núcleo, CLI e IPC; validação visual e Windows pendentes. |
-| AC-20 — acessibilidade | Entregue | Fluxo principal por teclado; foco visível; árvore com setas/Home/End; diálogos auditados em headless com Tab, Escape e `aria-live`, sem leitor de tela real. |
+| AC-19 — migração | Parcial | Inspeção, confirmação, backup, hashes, rollback e recuperação implementados/testados no núcleo, CLI, IPC e D-11 na WebView real; bloqueio de edição posterior e matriz visual no Windows pendentes. |
+| AC-20 — acessibilidade | Parcial | Fluxo principal por teclado; foco visível; árvore com setas/Home/End; diálogos auditados em headless (incluindo `aria-live`) e em D-09 na WebView real (foco, Tab e Escape); sem leitor de tela real ou conformidade WCAG. |
 | AC-21 — resposta grande | Parcial | Limite configurável e prévia binária; sem streaming. |
 | AC-22 — CLI consistente | Entregue | Mesmo modelo; `run`/`send` retornam códigos coerentes. |
 
@@ -101,13 +101,17 @@ A suíte do núcleo cobre:
 - migração: inspeção sem escrita, reuso de plano, backup/hashes, falha/interrupção, schema futuro, rollback e bloqueio de edições;
 - interface headless (teste, não produto): reabertura de rascunho, guardião, autosave e falha, criação/movimento/rename/remoção externos, comparação e aplicação, YAML inválido, salvar sem recarga, cursor antigo, ID duplicado, manifesto alterado e foco/teclado.
 
+## Validação automatizada no desktop real (Linux)
+
+O script [desktop-acceptance.mjs](../scripts/desktop-acceptance.mjs) executa o binário de release em WebKitGTK real, via `tauri-driver`, com coleções temporárias e servidor sintético. Em 2026-10-27, os 11 casos D-01 a D-11 passaram (HTTP 200/404, autosave e reinício, guardião, alteração externa/comparação, YAML inválido, lixeira, manifesto, cursor antigo, foco/Tab/Escape, cancelamento e migração/rollback). O benchmark de 1.000 requisições mediu `changes` em ~12–13 ms, abertura/recarga em ~137–143 ms e snapshot/tree abaixo de 1 ms. Evidências: [desktop](../../evidencias/reqlivo-v0.3.0/desktop/desktop-acceptance.txt) e [benchmark](../../evidencias/reqlivo-v0.3.0/bench-reconciliacao.md). Isso não cobre Windows, leitor de tela/WCAG, instalação limpa, seleção de pasta por diálogo nativo, importação/exportação por diálogo nem fechamento com rascunho.
+
 ## Validação manual da demonstração
 
 1. Suba `examples/servidor_demo.py`.
 2. Rode `reqlivo --collection examples/demo validate`.
 3. Rode `run --env dev` e confira 3 requisições, 3 passagens e hash determinístico.
 4. Rode `run --env seguro` com `REQLIVO_DEMO_TOKEN` definido e confira que o valor não aparece.
-5. Abra `npm run desktop:dev -- -- --collection examples/demo` e execute (roteiro pendente de validação interativa do desktop):
+5. Abra `npm run desktop:dev -- -- --collection examples/demo` e execute (roteiro manual complementar; D-01 a D-11 já foram automatizados no Linux):
    - abrir uma requisição;
    - enviar e ver status/tempo/tamanho;
    - abrir testes e logs;
@@ -119,9 +123,9 @@ A suíte do núcleo cobre:
 
 ## Próximos passos sugeridos
 
-1. Executar a matriz manual de rascunhos, alterações externas, lixeira e migração no desktop Linux e Windows.
-2. Medir reconciliação com 1.000 requisições e decidir se um watcher nativo é necessário; hoje a UI consulta ao focar/ficar visível.
+1. Executar a matriz manual no Windows e os itens nativos restantes no Linux (seleção de pasta, importação/exportação por diálogo e fechamento com rascunho); a matriz Linux em WebView real já passou 11/11.
+2. O benchmark de 1.000 requisições foi executado; decidir se um watcher nativo é necessário. O polling atual mediu ~12–13 ms por consulta e atende ao prazo de três segundos nesta medição.
 3. Adicionar streaming/limite progressivo para respostas grandes (AC-21).
 4. Ampliar importação (OpenAPI/HAR) e tradução de scripts Postman.
 5. Adicionar OAuth2, certificados e proxy como evolução pós-MVP.
-6. A 0.3.0 foi publicada na tag `v0.3.0` após CI Linux/Windows, instaladores, checksums e smoke automatizado; validar manualmente a instalação em máquinas limpas e ampliar a matriz de desktop.
+6. Realizar auditoria com leitor de tela/WCAG e validar manualmente a instalação em máquinas limpas; a matriz Linux automatizada e o benchmark já foram executados.

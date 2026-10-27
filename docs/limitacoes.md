@@ -48,7 +48,7 @@ O Reqlivo está em nível **MVP funcional**. As limitações abaixo são intenci
 ## Interface e acessibilidade
 
 - A interface é uma SPA vanilla, sem framework, com foco no fluxo principal.
-- A árvore, os diálogos e os atalhos principais são acessíveis por teclado. Um harness headless audita foco inicial, Tab, Escape e anúncios `aria-live` dos novos diálogos; não há auditoria com leitor de tela real, WebView nativa nem conformidade WCAG completa.
+- A árvore, os diálogos e os atalhos principais são acessíveis por teclado. O harness headless audita foco inicial, Tab, Escape e anúncios `aria-live`; a matriz D-01 a D-11, em WebView real no Linux, cobre foco inicial, Tab e Escape. Não há auditoria com leitor de tela real, conformidade WCAG completa nem cobertura nativa de seleção de pasta, importação/exportação por diálogo e fechamento com rascunho.
 - Tema escuro fixo; temas avançados estão fora do MVP.
 - Sem i18n: textos em português.
 - Respostas grandes são limitadas/truncadas; não há streaming visual incremental.
@@ -82,12 +82,12 @@ O Reqlivo está em nível **MVP funcional**. As limitações abaixo são intenci
 
 - Linux x86_64 e Windows x86_64 são os alvos iniciais. Sem macOS ou ARM.
 - Instaladores não possuem assinatura de código; atualização automática não está implementada.
-- Build automatizado não substitui validação interativa em cada sistema. Consulte [desktop.md](desktop.md).
+- Build automatizado e a matriz Linux em WebView real não substituem a validação manual no Windows, a inspeção visual do instalador nem a auditoria de acessibilidade. Consulte [desktop.md](desktop.md).
 
 ## Próximos marcos sugeridos
 
-1. Validação manual completa da 0.3.0 no desktop Linux e Windows e publicação após CI/instaladores/checksums.
-2. Benchmark de reconciliação com 1.000 requisições e eventual watcher nativo.
+1. Validação manual da 0.3.0 no Windows e dos itens nativos restantes no Linux; a matriz automatizada Linux em WebView real já cobriu 11 fluxos. Faltam instalação limpa e auditoria com leitor de tela/WCAG.
+2. Benchmark de reconciliação com 1.000 requisições executado (~12–13 ms por `changes`); decidir se um watcher nativo é necessário. O polling atual atende ao prazo de três segundos nesta medição.
 3. Streaming de resposta e upload.
 4. OAuth2, certificados e proxy.
 5. Expansão de importação/interoperabilidade e tradução de scripts.

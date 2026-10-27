@@ -4,7 +4,7 @@ title: Notas da versão 0.3.0
 
 # Reqlivo 0.3.0 — persistência e edição recuperável
 
-**Estado: publicada em 2026-10-27 na tag `v0.3.0`.** A [release no GitHub](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) contém `.deb`, `.AppImage`, instalador NSIS `.exe` e `SHA256SUMS`. O workflow `Desktop e releases` ([execução](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40544605429)) compilou e testou Linux e Windows, executou o smoke de abertura do AppImage e do executável Windows e só então publicou os artefatos. A matriz completa está em [resultado-validacao.md](proxima-release/resultado-validacao.md); a matriz manual de desktop e a auditoria com leitor de tela continuam pendentes.
+**Estado: publicada em 2026-10-27 na tag `v0.3.0`.** A [release no GitHub](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) contém `.deb`, `.AppImage`, instalador NSIS `.exe` e `SHA256SUMS`. O workflow `Desktop e releases` ([execução](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40544605429)) compilou e testou Linux e Windows, executou o smoke de abertura do AppImage e do executável Windows e só então publicou os artefatos. A matriz completa está em [resultado-validacao.md](proxima-release/resultado-validacao.md); a matriz automatizada Linux em WebView real passou 11/11, enquanto a matriz manual no Windows, a instalação limpa e a auditoria com leitor de tela continuam pendentes.
 
 ## Artefatos publicados
 
@@ -56,20 +56,22 @@ Comandos comuns (`run`, `send`, `validate`, edição) que encontram migração p
 
 Validação local (Linux x86_64) e remota (Linux/Windows):
 
-- `cargo fmt --all -- --check`, `cargo test --locked` (107 testes), `cargo test --workspace --locked` (107 testes), `cargo check --manifest-path src-tauri/Cargo.toml`, `node --check src/assets/app.js`, `node --check scripts/ui-acceptance.mjs` e `scripts/check-version.py` passaram.
+- `cargo fmt --all -- --check`, `cargo test --locked` (107 testes), `cargo test --workspace --locked` (107 testes), `cargo check --manifest-path src-tauri/Cargo.toml`, `node --check src/assets/app.js`, `node --check scripts/ui-acceptance.mjs`, `node --check scripts/desktop-acceptance.mjs`, `python3 -m py_compile scripts/x11-dialog-ok.py` e `scripts/check-version.py` passaram.
 - O workflow remoto `Desktop e releases` passou em `ubuntu-22.04` e `windows-latest` no push para `main` ([pré-validação](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40542757635)) e novamente na tag `v0.3.0` ([publicação](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40544605429)), incluindo o job que publicou os instaladores e o `SHA256SUMS`.
 - `examples/demo validate` passou; a demonstração CLI passou nos ambientes `dev` e `seguro` com servidor sintético em loopback.
 - O cenário CLI de inspeção, aplicação, bloqueio após rollback, nova inspeção e reaplicação passou em cópia temporária da demonstração.
 - Onze fluxos de interface passaram em Chrome headless com dados sintéticos: reabertura de rascunho, guardião, falha/prazo de autosave, criação/movimento/rename/remoção externos, comparação de conflito, YAML inválido, salvar sem recarga, cursor antigo, ID duplicado, manifesto alterado durante edição e foco/teclado. O harness é exclusivo de teste e não cria listener no produto.
+- Uma matriz adicional de 11 casos (D-01 a D-11) passou no **aplicativo desktop real** (Tauri/WebKitGTK) no Linux, via `tauri-driver` e WebKitWebDriver, com binário de release, Xvfb e servidor sintético. Ela cobre abertura/envio, autosave e reinício, guardião, alteração externa/comparação, YAML inválido, lixeira, manifesto, cursor antigo, foco/Tab/Escape, cancelamento e migração/rollback.
+- O benchmark de 1.000 requisições foi executado em três rodadas: `changes` ~12–13 ms, abertura/recarga ~137–143 ms, snapshot/tree <1 ms e RSS máximo ~9 MB.
 
-Evidências locais (fora deste repositório): [checks](../../evidencias/reqlivo-v0.3.0/checks.txt), [UI headless](../../evidencias/reqlivo-v0.3.0/ui/ui-acceptance.txt), [capturas](../../evidencias/reqlivo-v0.3.0/ui/), [demonstração CLI](../../evidencias/reqlivo-v0.3.0/demo-cli.txt), [migração/rollback](../../evidencias/reqlivo-v0.3.0/migracao-cli.txt) e [release](../../evidencias/reqlivo-v0.3.0/release.txt).
+Evidências locais (fora deste repositório): [checks](../../evidencias/reqlivo-v0.3.0/checks.txt), [UI headless](../../evidencias/reqlivo-v0.3.0/ui/ui-acceptance.txt), [capturas](../../evidencias/reqlivo-v0.3.0/ui/), [desktop real](../../evidencias/reqlivo-v0.3.0/desktop/desktop-acceptance.txt), [capturas desktop](../../evidencias/reqlivo-v0.3.0/desktop/), [benchmark](../../evidencias/reqlivo-v0.3.0/bench-reconciliacao.md), [demonstração CLI](../../evidencias/reqlivo-v0.3.0/demo-cli.txt), [migração/rollback](../../evidencias/reqlivo-v0.3.0/migracao-cli.txt) e [release](../../evidencias/reqlivo-v0.3.0/release.txt).
 
 ## Limitações restantes
 
-- A matriz manual de desktop (rascunhos, comparação de alterações, lixeira, diálogo de migração e rollback) **não foi executada** nesta validação. Os 11 fluxos headless não substituem WebView, IPC real, leitor de tela nem validação visual do instalador.
+- A matriz **manual** de desktop no Windows, a auditoria com leitor de tela e os itens nativos não automatizados **não foram executados**. No Linux, a matriz automatizada em WebView real passou 11/11; ela não substitui a validação manual de acessibilidade, instalador ou Windows.
 - Os builds Tauri finais, os três instaladores e o `SHA256SUMS` foram gerados e o smoke automatizado passou em Linux e Windows. A instalação manual dos artefatos publicados em máquinas limpas ainda não foi executada.
 - A falha de disco durante o autosave foi exercitada como falha de transporte no harness, não como indisponibilidade física do disco.
-- A detecção externa é por consulta ao focar/ficar visível, não por watcher nativo contínuo; o prazo de três segundos depende do ciclo de consulta e do tamanho da coleção.
+- A detecção externa é por consulta ao focar/ficar visível, não por watcher nativo contínuo. O benchmark de 1.000 requisições mediu `changes` em ~12–13 ms; o prazo de três segundos ainda depende do ciclo de consulta, do hardware e do tamanho da coleção.
 - Rascunhos são texto local sem criptografia e podem conter credenciais literais digitadas pelo usuário.
 - Não há merge automático, exclusão permanente da lixeira, exclusão recursiva de pasta nem rollback forçado.
 - Permanecem fora do escopo: streaming/upload progressivo, OAuth2/certificados/proxy, novos protocolos/importadores, tradução de scripts Postman, Git/nuvem/contas/plugins/temas/i18n/updater/assinatura e reescrita de framework da UI.
