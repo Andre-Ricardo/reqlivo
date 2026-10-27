@@ -54,7 +54,7 @@ Comandos comuns (`run`, `send`, `validate`, edição) que encontram migração p
 
 ## Validação executada
 
-Em Linux x86_64, na base local e no workflow remoto:
+Validação local (Linux x86_64) e remota (Linux/Windows):
 
 - `cargo fmt --all -- --check`, `cargo test --locked` (107 testes), `cargo test --workspace --locked` (107 testes), `cargo check --manifest-path src-tauri/Cargo.toml`, `node --check src/assets/app.js`, `node --check scripts/ui-acceptance.mjs` e `scripts/check-version.py` passaram.
 - O workflow remoto `Desktop e releases` passou em `ubuntu-22.04` e `windows-latest` no push para `main` ([pré-validação](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40542757635)) e novamente na tag `v0.3.0` ([publicação](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40544605429)), incluindo o job que publicou os instaladores e o `SHA256SUMS`.

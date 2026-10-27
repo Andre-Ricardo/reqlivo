@@ -4,7 +4,7 @@ title: Resultado de validação da 0.3.0
 
 # Resultado de validação — Reqlivo 0.3.0
 
-**Data da execução:** 2026-10-27 UTC. **Plataformas:** Linux x86_64 (kernel 7.0.0-38-generic) local, Rust/Cargo 1.97.1; workflow remoto em `ubuntu-22.04` e `windows-latest`. **Base:** commit `bbc4822` na `main`, tag `v0.3.0`. **Versão verificada:** `0.3.0`.
+**Data da execução:** 2026-10-27 UTC. **Plataformas:** Linux x86_64 (kernel 7.0.0-38-generic) local, Rust/Cargo 1.97.1; workflow remoto em `ubuntu-22.04` e `windows-latest`. **Base:** checks locais no commit `949ef43`, com conteúdo idêntico ao commit `bbc4822` publicado na `main` e na tag `v0.3.0`. **Versão verificada:** `0.3.0`.
 
 **Conclusão:** a automação de núcleo, CLI, IPC e API passou; 11 fluxos de interface foram exercitados em Chrome headless; e o workflow remoto compilou/testou Linux e Windows, executou o smoke de abertura e publicou os três instaladores com `SHA256SUMS`. A [release 0.3.0](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) está publicada. A matriz manual de desktop, a auditoria com leitor de tela, o benchmark de 1.000 requisições e a instalação manual em máquinas limpas **não foram executados**. Este arquivo registra apenas o que foi realmente executado.
 
