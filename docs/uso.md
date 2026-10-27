@@ -44,6 +44,25 @@ Consulte [desktop.md](desktop.md) para pré-requisitos e instaladores. **Abrir c
 
 A árvore é navegável por teclado. `↑`/`↓` percorre itens, `Home`/`End` vai ao início/fim, `←`/`→` recolhe/expande pastas e `Enter`/`Espaço` abre o item focado. O filtro da árvore fica em `Ctrl/Cmd+K`.
 
+### Rascunhos, alterações externas e conflitos
+
+- Enquanto o editor tem alterações, o Reqlivo protege um rascunho em `.reqlivo/drafts/` (até 2 s após a última edição, com limite de 5 s durante digitação contínua). O YAML canônico só muda ao usar **Salvar**.
+- O indicador do editor diferencia “Alterações não salvas”, “Protegendo rascunho…”, “Rascunho protegido” e falha de proteção. Rascunhos são texto local sem criptografia e podem conter credenciais literais digitadas; no Unix usam permissão `0600`.
+- Trocar de requisição/coleção, recarregar ou fechar com edição pendente abre o guardião de navegação: **Salvar**, **Manter rascunho e continuar**, **Descartar alterações** ou **Cancelar**.
+- Ao reabrir, **Rascunhos** lista edições recuperáveis. Se o arquivo mudou, o rascunho aparece como divergente e o salvamento permanece bloqueado até uma decisão explícita. Se o arquivo sumiu, o rascunho órfão pode virar uma nova requisição com ID novo.
+- A UI consulta o disco enquanto a janela está visível e ao receber foco. Uma alteração externa mostra um aviso com os caminhos afetados; com o editor sujo, a edição local é preservada. **Recarregar** exige que nenhuma alteração seja descartada silenciosamente.
+- **Comparar** lê a versão atual do arquivo no disco, não o snapshot em memória usado pelo envio. **Manter** conserva a edição sem sobrescrever o disco; **Usar disco** descarta o rascunho; **Aplicar sobre a nova base** realinha a revisão e grava a edição local.
+- YAML inválido não substitui o último snapshot válido: a UI mostra o caminho e o erro, mantém o editor utilizável e volta a reconciliar depois que o arquivo é corrigido.
+- Conflitos de revisão retornam HTTP 409 (`revision_conflict`, `generation_conflict`) e mantêm o formulário e o rascunho no lugar. Um salvamento de ambiente/configuração rejeitado não altera o estado em memória.
+
+### Lixeira
+
+O botão **Lixeira** lista requisições e pastas vazias excluídas, com nome, tipo, origem e data. Selecione uma entrada e escolha pasta/nome de destino; o conteúdo original e o ID são preservados. Destino ocupado, ID já ativo, hash divergente ou entrada legada ilegível geram erro explícito, sem sobrescrever arquivos. Pastas não vazias continuam exigindo que os itens sejam movidos primeiro.
+
+### Migração
+
+Se a coleção usa um `schemaVersion` anterior, a abertura não migra sozinha. O diálogo mostra schema atual/destino, arquivos, motivo, plano, revisão, backup e operações anteriores. **Cancelar** mantém tudo intacto; **Aplicar** exige confirmação explícita e grava backup verificável em `.reqlivo/backups/`. Depois de um rollback, a coleção entra em recuperação: leituras continuam disponíveis, escritas e execuções ficam bloqueadas até uma nova inspeção e confirmação.
+
 ### Resposta
 
 O painel mostra:
@@ -126,6 +145,18 @@ reqlivo --collection minha-api send req_... --json
 ```
 
 `send` usa o ambiente padrão quando `--env` não é informado. Em caso de falha, retorna código `1`.
+
+### Migrar a coleção
+
+```bash
+reqlivo --collection minha-api migration inspect
+reqlivo --collection minha-api migration inspect --json
+reqlivo --collection minha-api migration apply mig_... --revision <revisao>
+reqlivo --collection minha-api migration rollback mig_... --revision <revisao>
+reqlivo --collection minha-api migration list
+```
+
+`inspect` não altera arquivos: lista schema, motivos, arquivos e o plano preparado. `apply` exige o ID do plano e, quando informada, confere a revisão; cria backup completo antes da primeira escrita e valida o resultado. `rollback` restaura os bytes anteriores somente se nenhum arquivo tocado foi editado depois da migração; arquivos independentes permanecem intactos. Comandos comuns que encontram migração pendente retornam erro acionável e não migram silenciosamente. Após rollback, `validate`/`run` continuam bloqueados até nova inspeção e aplicação.
 
 ### Importar
 
@@ -215,4 +246,4 @@ No modo offline:
 | `1` | falha de validação, execução, importação/exportação ou erro de rede. |
 | `--json` | o erro vai para `stderr`; o resultado vai para `stdout`. |
 
-Mensagens de erro incluem categoria, código e próximo passo quando disponível. Segredos conhecidos são redigidos.
+Mensagens de erro incluem categoria, código e próximo passo quando disponível. Segredos conhecidos são redigidos. Na ponte IPC, conflitos recuperáveis usam HTTP 409 com códigos estáveis (`revision_conflict`, `generation_conflict`, `draft_generation`, `destination_exists`, `duplicate_id`, `restore_conflict`, `migration_required`, `confirmation_required`, `collection_unavailable`); o formulário e o rascunho permanecem disponíveis.

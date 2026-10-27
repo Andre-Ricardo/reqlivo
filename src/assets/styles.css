@@ -337,6 +337,45 @@ label input, label select, label textarea { display: block; width: 100%; margin-
 .plain-list li { margin: 0.3rem 0; }
 .plain-list code { color: var(--text); }
 
+/* Banners de estado */
+.banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap;
+  margin: 0.6rem 1rem 0; padding: 0.5rem 0.7rem;
+  border: 1px solid #6b5426; border-radius: var(--radius-sm);
+  background: #2b2413; color: #ffe1a2; font-size: 0.8rem;
+}
+.banner-inline { margin: 0 0 0.6rem; }
+.banner-text { flex: 1; min-width: 12rem; }
+.banner-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+
+/* Rascunhos e lixeira */
+.draft-list, .trash-list {
+  display: flex; flex-direction: column; gap: 0.4rem;
+  max-height: 26rem; overflow: auto; padding: 0.15rem;
+}
+.draft-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.7rem; flex-wrap: wrap;
+  padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.draft-info { display: flex; flex-direction: column; gap: 0.1rem; min-width: 12rem; }
+.draft-info .muted { font-size: 0.74rem; }
+.draft-actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.trash-row {
+  display: flex; align-items: flex-start; gap: 0.55rem;
+  padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg); cursor: pointer; color: var(--text);
+}
+.trash-row:hover { border-color: var(--border-strong); }
+.trash-row input { margin-top: 0.2rem; }
+.trash-info { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.trash-info .muted { font-size: 0.74rem; }
+.dialog-actions-stack { flex-direction: column; align-items: stretch; }
+.dialog-actions-stack .btn { justify-content: flex-start; }
+.error-text { color: var(--danger); font-size: 0.78rem; }
+.save-state.is-saving { color: var(--info); }
+.save-state.is-error { color: var(--danger); }
+
 /* Toast */
 .toast {
   position: fixed; right: 1rem; bottom: 1rem; z-index: 80;

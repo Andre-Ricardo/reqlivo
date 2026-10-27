@@ -1,11 +1,12 @@
 {
   "name": "reqlivo-desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
-    "desktop:info": "tauri info"
+    "desktop:info": "tauri info",
+    "test:ui": "node scripts/ui-acceptance.mjs"
   },
   "devDependencies": { "@tauri-apps/cli": "^2" }
 }

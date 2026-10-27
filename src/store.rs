@@ -1,15 +1,15 @@
 use crate::error::{Error, Result};
 use crate::model::*;
+use crate::persist;
 use crate::variables::ScopeInput;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const MANIFEST_FILE: &str = "opencollection.yml";
 pub const FOLDER_FILE: &str = "folder.yml";
-const REQLIVO_DIR: &str = ".reqlivo";
+const REQLIVO_DIR: &str = persist::INTERNAL_DIR;
 
 #[derive(Debug, Clone)]
 pub struct FolderEntry {
@@ -106,6 +106,8 @@ pub struct CollectionStore {
     pub requests: BTreeMap<String, RequestEntry>,
     pub unsupported: Vec<UnsupportedItem>,
     pub warnings: Vec<String>,
+    pub generation: String,
+    pub fingerprints: BTreeMap<String, String>,
     children: BTreeMap<Option<String>, Vec<ItemRef>>,
 }
 
@@ -136,6 +138,7 @@ pub struct CollectionSnapshot {
     pub root: String,
     pub manifest: CollectionManifest,
     pub manifest_revision: String,
+    pub generation: String,
     pub tree: Vec<TreeNode>,
     pub environments: Vec<Environment>,
     pub default_environment: Option<String>,
@@ -178,6 +181,19 @@ impl CollectionStore {
                 root.display()
             )));
         }
+        crate::migration::recover_interrupted(&root)?;
+        let inspection = crate::migration::inspect(&root)?;
+        if inspection.required {
+            let plan = inspection.plan_id.unwrap_or_default();
+            return Err(Error::Conflict {
+                code: "migration_required",
+                message: format!(
+                    "a coleção '{}' precisa de migração confirmada (plano {plan}); use a interface ou `reqlivo --collection {} migration inspect`",
+                    root.display(),
+                    root.display()
+                ),
+            });
+        }
         let manifest_path = find_manifest(&root).ok_or_else(|| {
             Error::Storage(format!(
                 "'{}' não contém {MANIFEST_FILE}; crie uma coleção com `reqlivo init`",
@@ -186,16 +202,13 @@ impl CollectionStore {
         })?;
         let manifest_bytes = fs::read(&manifest_path)?;
         let manifest_revision = hash_bytes(&manifest_bytes);
-        let mut manifest: CollectionManifest = serde_yaml::from_slice(&manifest_bytes)?;
+        let manifest: CollectionManifest = serde_yaml::from_slice(&manifest_bytes)?;
         if manifest.bundled {
             return Err(Error::Storage(format!(
                 "'{}' é uma coleção OpenCollection empacotada; importe-a com `reqlivo import opencollection`",
                 manifest_path.display()
             )));
         }
-
-        let mut warnings = Vec::new();
-        migrate_manifest(&root, &manifest_path, &mut manifest, &mut warnings)?;
 
         let mut store = Self {
             root: root.clone(),
@@ -204,7 +217,9 @@ impl CollectionStore {
             folders: BTreeMap::new(),
             requests: BTreeMap::new(),
             unsupported: Vec::new(),
-            warnings,
+            warnings: Vec::new(),
+            generation: String::new(),
+            fingerprints: BTreeMap::new(),
             children: BTreeMap::new(),
         };
 
@@ -215,6 +230,8 @@ impl CollectionStore {
         store.load_directory(&root, None, &mut seen_ids)?;
         store.rebuild_children();
         store.validate_tree()?;
+        store.sync_fingerprint()?;
+        let _ = crate::trash::reconcile(&root);
         Ok(store)
     }
 
@@ -280,7 +297,7 @@ impl CollectionStore {
                 });
                 continue;
             }
-            let mut request: RequestFile = match serde_yaml::from_slice(&bytes) {
+            let request: RequestFile = match serde_yaml::from_slice(&bytes) {
                 Ok(request) => request,
                 Err(error) => {
                     self.unsupported.push(UnsupportedItem {
@@ -291,33 +308,31 @@ impl CollectionStore {
                     continue;
                 }
             };
-            let mut id = request.reqlivo_id().map(str::to_string);
+            let id = request.reqlivo_id().map(str::to_string);
             if id
                 .as_deref()
                 .map(|value| !seen_ids.insert(value.to_string()))
                 .unwrap_or(false)
             {
-                return Err(Error::Validation(format!(
-                    "ID duplicado '{}' em {}",
-                    id.unwrap_or_default(),
-                    path.display()
-                )));
+                return Err(Error::Conflict {
+                    code: "duplicate_id",
+                    message: format!(
+                        "ID duplicado '{}' em {}",
+                        id.unwrap_or_default(),
+                        path.display()
+                    ),
+                });
             }
             if id.is_none() {
-                id = Some(new_id("req", seen_ids));
-                ensure_reqlivo_ext(&mut request.extensions).id = id.clone();
-                write_yaml(&path, &request)?;
-                self.warnings.push(format!(
-                    "ID atribuído automaticamente a {}",
-                    relative(&self.root, &path)
-                ));
+                return Err(Error::Conflict {
+                    code: "migration_required",
+                    message: format!(
+                        "{} não tem ID; confirme a migração antes de abrir a coleção",
+                        relative(&self.root, &path)
+                    ),
+                });
             }
-            let id = id.expect("id gerado");
-            let revision = if request.reqlivo_id() == Some(id.as_str()) {
-                revision
-            } else {
-                hash_bytes(&fs::read(&path)?)
-            };
+            let id = id.expect("id verificado");
             self.requests.insert(
                 id.clone(),
                 RequestEntry {
@@ -347,34 +362,32 @@ impl CollectionStore {
             };
             let bytes = fs::read(&folder_file)?;
             let revision = hash_bytes(&bytes);
-            let mut folder: FolderFile = serde_yaml::from_slice(&bytes)?;
-            let mut id = folder.reqlivo_id().map(str::to_string);
+            let folder: FolderFile = serde_yaml::from_slice(&bytes)?;
+            let id = folder.reqlivo_id().map(str::to_string);
             if id
                 .as_deref()
                 .map(|value| !seen_ids.insert(value.to_string()))
                 .unwrap_or(false)
             {
-                return Err(Error::Validation(format!(
-                    "ID de pasta duplicado '{}' em {}",
-                    id.unwrap_or_default(),
-                    path.display()
-                )));
+                return Err(Error::Conflict {
+                    code: "duplicate_id",
+                    message: format!(
+                        "ID de pasta duplicado '{}' em {}",
+                        id.unwrap_or_default(),
+                        path.display()
+                    ),
+                });
             }
             if id.is_none() {
-                id = Some(new_id("fld", seen_ids));
-                ensure_reqlivo_ext(&mut folder.extensions).id = id.clone();
-                write_yaml(&folder_file, &folder)?;
-                self.warnings.push(format!(
-                    "ID atribuído automaticamente a {}",
-                    relative(&self.root, &folder_file)
-                ));
+                return Err(Error::Conflict {
+                    code: "migration_required",
+                    message: format!(
+                        "{} não tem ID; confirme a migração antes de abrir a coleção",
+                        relative(&self.root, &folder_file)
+                    ),
+                });
             }
-            let id = id.expect("id gerado");
-            let rev = if folder.reqlivo_id() == Some(id.as_str()) {
-                revision
-            } else {
-                hash_bytes(&fs::read(&folder_file)?)
-            };
+            let id = id.expect("id verificado");
             self.folders.insert(
                 id.clone(),
                 FolderEntry {
@@ -386,7 +399,7 @@ impl CollectionStore {
                     seq: folder.info.seq,
                     tags: folder.info.tags.clone(),
                     file: folder,
-                    revision: rev,
+                    revision,
                 },
             );
             self.load_directory(&path, Some(id), seen_ids)?;
@@ -458,12 +471,29 @@ impl CollectionStore {
             root: self.root.display().to_string(),
             manifest: self.manifest.clone(),
             manifest_revision: self.manifest_revision.clone(),
+            generation: self.generation.clone(),
             tree: self.tree(),
             environments: self.manifest.environments().to_vec(),
             default_environment: self.default_environment(),
             unsupported: self.unsupported.clone(),
             warnings: self.warnings.clone(),
         }
+    }
+
+    fn sync_fingerprint(&mut self) -> Result<()> {
+        let fingerprints = persist::scan_tree(&self.root)?;
+        self.generation = persist::fingerprint(&fingerprints);
+        self.fingerprints = fingerprints;
+        Ok(())
+    }
+
+    pub fn changes(&self, root: &Path) -> Result<(String, Vec<String>)> {
+        let current = persist::scan_tree(root)?;
+        let generation = persist::fingerprint(&current);
+        Ok((
+            generation,
+            persist::changed_paths(&self.fingerprints, &current),
+        ))
     }
 
     pub fn tree(&self) -> Vec<TreeNode> {
@@ -506,13 +536,13 @@ impl CollectionStore {
     pub fn request(&self, id: &str) -> Result<&RequestEntry> {
         self.requests
             .get(id)
-            .ok_or_else(|| Error::Storage(format!("requisição '{id}' não encontrada")))
+            .ok_or_else(|| Error::NotFound(format!("requisição '{id}' não encontrada")))
     }
 
     pub fn folder(&self, id: &str) -> Result<&FolderEntry> {
         self.folders
             .get(id)
-            .ok_or_else(|| Error::Storage(format!("pasta '{id}' não encontrada")))
+            .ok_or_else(|| Error::NotFound(format!("pasta '{id}' não encontrada")))
     }
 
     pub fn request_payload(&self, id: &str) -> Result<RequestPayload> {
@@ -860,13 +890,16 @@ impl CollectionStore {
         expected_revision: Option<&str>,
     ) -> Result<RequestPayload> {
         request.validate()?;
+        let _lock = persist::CollectionLock::acquire(&self.root)?;
         let entry = self.request(id)?.clone();
         let current = hash_bytes(&fs::read(&entry.path)?);
         if let Some(expected) = expected_revision {
             if expected != current {
-                return Err(Error::Storage(
-                    "o arquivo foi alterado fora do Reqlivo; recarregue antes de salvar".into(),
-                ));
+                return Err(Error::Conflict {
+                    code: "revision_conflict",
+                    message: "o arquivo foi alterado fora do Reqlivo; recarregue antes de salvar"
+                        .into(),
+                });
             }
         }
         let ext = ensure_reqlivo_ext(&mut request.extensions);
@@ -895,6 +928,7 @@ impl CollectionStore {
         };
         self.requests.insert(id.to_string(), updated);
         self.rebuild_children();
+        self.sync_fingerprint()?;
         Ok(RequestPayload {
             id: id.to_string(),
             revision,
@@ -910,6 +944,7 @@ impl CollectionStore {
         method: impl Into<String>,
         url: impl Into<String>,
     ) -> Result<RequestPayload> {
+        let _lock = persist::CollectionLock::acquire(&self.root)?;
         let parent = match parent {
             Some(id) => Some(self.folder(id)?.clone()),
             None => None,
@@ -972,6 +1007,7 @@ impl CollectionStore {
         };
         self.requests.insert(id.clone(), entry);
         self.rebuild_children();
+        self.sync_fingerprint()?;
         Ok(RequestPayload {
             id,
             revision,
@@ -985,6 +1021,7 @@ impl CollectionStore {
         parent: Option<&str>,
         name: impl Into<String>,
     ) -> Result<String> {
+        let _lock = persist::CollectionLock::acquire(&self.root)?;
         let name = name.into();
         if name.trim().is_empty() {
             return Err(Error::Validation("o nome da pasta é obrigatório".into()));
@@ -1046,10 +1083,12 @@ impl CollectionStore {
             },
         );
         self.rebuild_children();
+        self.sync_fingerprint()?;
         Ok(id)
     }
 
     pub fn rename_folder(&mut self, id: &str, name: impl Into<String>) -> Result<()> {
+        let _lock = persist::CollectionLock::acquire(&self.root)?;
         let name = name.into();
         if name.trim().is_empty() {
             return Err(Error::Validation("o nome da pasta é obrigatório".into()));
@@ -1069,6 +1108,7 @@ impl CollectionStore {
             },
         );
         self.rebuild_children();
+        self.sync_fingerprint()?;
         Ok(())
     }
 
@@ -1078,6 +1118,7 @@ impl CollectionStore {
         defaults: Option<RequestDefaults>,
         docs: Option<String>,
     ) -> Result<()> {
+        let _lock = persist::CollectionLock::acquire(&self.root)?;
         let entry = self.folder(id)?.clone();
         let mut file = entry.file.clone();
         file.request = defaults;
@@ -1095,62 +1136,46 @@ impl CollectionStore {
             },
         );
         self.rebuild_children();
+        self.sync_fingerprint()?;
         Ok(())
     }
 
     pub fn set_collection_defaults(&mut self, defaults: Option<RequestDefaults>) -> Result<()> {
         let mut manifest = self.manifest.clone();
         manifest.request = defaults;
-        self.manifest = manifest;
-        self.save_manifest()
+        self.commit_manifest(manifest, None)
     }
 
     pub fn delete_request(&mut self, id: &str) -> Result<String> {
-        let entry = self.request(id)?.clone();
-        let trash = self.root.join(REQLIVO_DIR).join("trash");
-        fs::create_dir_all(&trash)?;
-        let target = trash.join(format!(
-            "{}-{}",
-            chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ"),
-            entry
-                .path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("request.yml")
-        ));
-        fs::rename(&entry.path, &target)?;
+        self.delete_request_with(id, None)
+    }
+
+    pub fn delete_request_with(
+        &mut self,
+        id: &str,
+        expected_revision: Option<&str>,
+    ) -> Result<String> {
+        let trash = crate::trash::delete_request_with(&self.root, self, id, expected_revision)?;
         self.requests.remove(id);
         self.rebuild_children();
-        Ok(target.display().to_string())
+        self.sync_fingerprint()?;
+        Ok(trash)
     }
 
     pub fn delete_folder(&mut self, id: &str) -> Result<String> {
-        let entry = self.folder(id)?.clone();
-        let has_children = self
-            .children
-            .get(&Some(id.to_string()))
-            .map(|children| !children.is_empty())
-            .unwrap_or(false);
-        if has_children {
-            return Err(Error::Validation(
-                "a pasta não está vazia; mova ou apague os itens primeiro".into(),
-            ));
-        }
-        let trash = self.root.join(REQLIVO_DIR).join("trash");
-        fs::create_dir_all(&trash)?;
-        let target = trash.join(format!(
-            "{}-{}",
-            chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ"),
-            entry
-                .dir
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("folder")
-        ));
-        fs::rename(&entry.dir, &target)?;
+        self.delete_folder_with(id, None)
+    }
+
+    pub fn delete_folder_with(
+        &mut self,
+        id: &str,
+        expected_revision: Option<&str>,
+    ) -> Result<String> {
+        let trash = crate::trash::delete_folder_with(&self.root, self, id, expected_revision)?;
         self.folders.remove(id);
         self.rebuild_children();
-        Ok(target.display().to_string())
+        self.sync_fingerprint()?;
+        Ok(trash)
     }
 
     pub fn add_request(
@@ -1158,6 +1183,7 @@ impl CollectionStore {
         parent: Option<&str>,
         mut request: RequestFile,
     ) -> Result<RequestPayload> {
+        let _lock = persist::CollectionLock::acquire(&self.root)?;
         let parent_entry = match parent {
             Some(id) => Some(self.folder(id)?.clone()),
             None => None,
@@ -1194,6 +1220,7 @@ impl CollectionStore {
             },
         );
         self.rebuild_children();
+        self.sync_fingerprint()?;
         Ok(RequestPayload {
             id: id.clone(),
             revision,
@@ -1212,6 +1239,17 @@ impl CollectionStore {
         variables: Vec<Variable>,
         secret_refs: Vec<SecretRef>,
         extends: Option<String>,
+    ) -> Result<()> {
+        self.upsert_environment_with(name, variables, secret_refs, extends, None)
+    }
+
+    pub fn upsert_environment_with(
+        &mut self,
+        name: &str,
+        variables: Vec<Variable>,
+        secret_refs: Vec<SecretRef>,
+        extends: Option<String>,
+        expected_revision: Option<&str>,
     ) -> Result<()> {
         if name.trim().is_empty() {
             return Err(Error::Validation("o nome do ambiente é obrigatório".into()));
@@ -1256,17 +1294,23 @@ impl CollectionStore {
                 settings.default_environment = Some(name.to_string());
             }
         }
-        self.manifest = manifest;
-        self.save_manifest()?;
-        Ok(())
+        self.commit_manifest(manifest, expected_revision)
     }
 
     pub fn delete_environment(&mut self, name: &str) -> Result<()> {
+        self.delete_environment_with(name, None)
+    }
+
+    pub fn delete_environment_with(
+        &mut self,
+        name: &str,
+        expected_revision: Option<&str>,
+    ) -> Result<()> {
         let mut manifest = self.manifest.clone();
         let before = manifest.config.environments.len();
         manifest.config.environments.retain(|env| env.name != name);
         if manifest.config.environments.len() == before {
-            return Err(Error::Storage(format!("ambiente '{name}' não encontrado")));
+            return Err(Error::NotFound(format!("ambiente '{name}' não encontrado")));
         }
         for environment in &mut manifest.config.environments {
             if environment.extends.as_deref() == Some(name) {
@@ -1287,18 +1331,44 @@ impl CollectionStore {
                 }
             }
         }
-        self.manifest = manifest;
-        self.save_manifest()?;
-        Ok(())
+        self.commit_manifest(manifest, expected_revision)
     }
 
     pub fn save_manifest(&mut self) -> Result<()> {
+        self.save_manifest_with(None)
+    }
+
+    /// Substitui o manifesto em memória somente depois que a escrita no disco
+    /// foi verificada. Uma revisão divergente devolve erro sem deixar o estado
+    /// interno diferente do arquivo.
+    fn commit_manifest(
+        &mut self,
+        manifest: CollectionManifest,
+        expected_revision: Option<&str>,
+    ) -> Result<()> {
+        let previous = std::mem::replace(&mut self.manifest, manifest);
+        match self.save_manifest_with(expected_revision) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.manifest = previous;
+                Err(error)
+            }
+        }
+    }
+
+    pub fn save_manifest_with(&mut self, expected_revision: Option<&str>) -> Result<()> {
+        let _lock = persist::CollectionLock::acquire(&self.root)?;
+        let path = find_manifest(&self.root).unwrap_or_else(|| self.root.join(MANIFEST_FILE));
+        let expected = expected_revision.unwrap_or(&self.manifest_revision);
+        if path.exists() {
+            persist::ensure_revision(&path, Some(expected))?;
+        }
         let mut manifest = self.manifest.clone();
         ensure_reqlivo_ext(&mut manifest.extensions);
-        let path = find_manifest(&self.root).unwrap_or_else(|| self.root.join(MANIFEST_FILE));
         write_yaml(&path, &manifest)?;
         self.manifest = manifest;
         self.manifest_revision = hash_bytes(&fs::read(&path)?);
+        self.sync_fingerprint()?;
         Ok(())
     }
 
@@ -1307,13 +1377,21 @@ impl CollectionStore {
         settings: CollectionSettings,
         default_environment: Option<String>,
     ) -> Result<()> {
+        self.update_settings_with(settings, default_environment, None)
+    }
+
+    pub fn update_settings_with(
+        &mut self,
+        settings: CollectionSettings,
+        default_environment: Option<String>,
+        expected_revision: Option<&str>,
+    ) -> Result<()> {
         let mut manifest = self.manifest.clone();
         let ext = ensure_reqlivo_ext(&mut manifest.extensions);
         let mut settings = settings;
         settings.default_environment = default_environment;
         ext.settings = Some(settings);
-        self.manifest = manifest;
-        self.save_manifest()
+        self.commit_manifest(manifest, expected_revision)
     }
 
     fn seq_of(&self, item: &ItemRef) -> i64 {
@@ -1512,64 +1590,6 @@ pub fn init_collection(path: impl AsRef<Path>, name: &str) -> Result<CollectionS
     CollectionStore::open(&root)
 }
 
-fn migrate_manifest(
-    root: &Path,
-    path: &Path,
-    manifest: &mut CollectionManifest,
-    warnings: &mut Vec<String>,
-) -> Result<()> {
-    let current = manifest
-        .extensions
-        .reqlivo
-        .as_ref()
-        .map(|ext| ext.schema_version)
-        .unwrap_or(0);
-    if current > SCHEMA_VERSION {
-        return Err(Error::Storage(format!(
-            "schemaVersion {current} é mais novo que o suportado ({SCHEMA_VERSION}); atualize o Reqlivo"
-        )));
-    }
-    if current == SCHEMA_VERSION {
-        return Ok(());
-    }
-
-    let backup_dir = root.join(REQLIVO_DIR).join("backups");
-    fs::create_dir_all(&backup_dir)?;
-    let backup = backup_dir.join(format!(
-        "{}-opencollection.yml",
-        chrono::Utc::now().format("%Y%m%dT%H%M%S%.3fZ")
-    ));
-    fs::copy(path, &backup)?;
-    warnings.push(format!(
-        "manifesto migrado de schemaVersion {current} para {SCHEMA_VERSION}; backup em {}",
-        backup.display()
-    ));
-
-    let ext = ensure_reqlivo_ext(&mut manifest.extensions);
-    ext.schema_version = SCHEMA_VERSION;
-    if ext.id.is_none() {
-        ext.id = Some(format!("col_{}", short_uuid()));
-    }
-    if ext.settings.is_none() {
-        ext.settings = Some(CollectionSettings::default());
-    }
-    let mut seen = BTreeSet::new();
-    seen.insert(ext.id.clone().unwrap_or_default());
-    for environment in &manifest.config.environments {
-        if !ext.environment_ids.contains_key(&environment.name) {
-            ext.environment_ids
-                .insert(environment.name.clone(), format!("env_{}", short_uuid()));
-        }
-    }
-    let mut manifest_clone = manifest.clone();
-    write_yaml(path, &manifest_clone)?;
-    // Garante que a versão serializada continua legível.
-    let reparsed: CollectionManifest = serde_yaml::from_slice(&fs::read(path)?)?;
-    *manifest = reparsed;
-    let _ = &mut manifest_clone;
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // Helpers de arquivos
 // ---------------------------------------------------------------------------
@@ -1604,24 +1624,7 @@ pub fn write_yaml<T: Serialize>(path: &Path, value: &T) -> Result<()> {
 }
 
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let temp = path.with_file_name(format!(
-        ".{}.tmp-{}",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("reqlivo"),
-        short_uuid()
-    ));
-    {
-        use std::io::Write;
-        let mut file = fs::File::create(&temp)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-    }
-    fs::rename(&temp, path)?;
-    Ok(())
+    persist::atomic_write(path, bytes)
 }
 
 fn copy_tree(source: &Path, destination: &Path, copied: &mut Vec<String>) -> Result<()> {
@@ -1664,9 +1667,7 @@ pub fn relative(root: &Path, path: &Path) -> String {
 }
 
 pub fn hash_bytes(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hex::encode(hasher.finalize())
+    persist::hash_bytes(bytes)
 }
 
 pub fn new_id(prefix: &str, seen: &mut BTreeSet<String>) -> String {
@@ -1799,7 +1800,7 @@ mod tests {
             .create_request(None, "Echo", "GET", "http://127.0.0.1/echo")
             .unwrap();
         let trash = store.delete_request(&payload.id).unwrap();
-        assert!(Path::new(&trash).exists());
+        assert!(store.root.join(".reqlivo/trash").join(&trash).exists());
         assert!(store.request(&payload.id).is_err());
     }
 

@@ -30,8 +30,18 @@ pub struct AppState {
     pub root: PathBuf,
     pub log: LocalLog,
     pub cookie_jar: Arc<reqwest::cookie::Jar>,
+    recovery: Arc<RwLock<Option<RecoveryView>>>,
     tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
     runs: Arc<Mutex<HashMap<String, StoredRun>>>,
+}
+
+/// Estado exibido quando a coleção não pode mais aceitar escritas, por
+/// exemplo após um rollback que devolveu o projeto a um schema antigo.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryView {
+    pub reason: String,
+    pub message: String,
 }
 
 impl AppState {
@@ -48,9 +58,25 @@ impl AppState {
             log: LocalLog::new(&root),
             root,
             cookie_jar: Arc::new(reqwest::cookie::Jar::default()),
+            recovery: Arc::new(RwLock::new(None)),
             tokens: Arc::new(Mutex::new(HashMap::new())),
             runs: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub async fn recovery(&self) -> Option<RecoveryView> {
+        self.recovery.read().await.clone()
+    }
+
+    async fn block(&self, reason: &str, message: impl Into<String>) {
+        *self.recovery.write().await = Some(RecoveryView {
+            reason: reason.to_string(),
+            message: message.into(),
+        });
+    }
+
+    async fn unblock(&self) {
+        *self.recovery.write().await = None;
     }
 }
 
@@ -66,12 +92,16 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/collection", get(snapshot))
+        .route("/api/collection/changes", get(collection_changes))
         .route("/api/collection/reload", post(reload))
         .route("/api/requests", post(create_request))
         .route(
             "/api/requests/{id}",
             get(get_request).put(save_request).delete(delete_request),
         )
+        // Leitura explícita do disco para comparação de conflitos. O snapshot
+        // em memória continua sendo o usado por envio/runner.
+        .route("/api/requests/{id}/disk", get(get_request_disk))
         .route("/api/folders", post(create_folder))
         .route(
             "/api/folders/{id}",
@@ -86,6 +116,18 @@ pub fn router(state: AppState) -> Router {
             put(save_environment).delete(delete_environment),
         )
         .route("/api/settings", put(save_settings))
+        .route("/api/drafts", get(list_drafts))
+        .route(
+            "/api/drafts/{id}",
+            get(get_draft).put(save_draft).delete(delete_draft),
+        )
+        .route("/api/drafts/{id}/adopt", post(adopt_draft))
+        .route("/api/trash", get(list_trash))
+        .route("/api/trash/{id}/restore", post(restore_trash))
+        .route("/api/migrations/inspect", post(inspect_migration))
+        .route("/api/migrations/apply", post(apply_migration))
+        .route("/api/migrations", get(list_migrations))
+        .route("/api/migrations/{id}/rollback", post(rollback_migration))
         .route("/api/send", post(send))
         .route("/api/send/{id}/cancel", post(cancel_send))
         .route("/api/run", post(start_run))
@@ -97,8 +139,34 @@ pub fn router(state: AppState) -> Router {
         .route("/api/export", post(export))
         .route("/api/validate", post(validate))
         .fallback(get(fallback))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            recovery_guard,
+        ))
         .layer(middleware::from_fn(loopback_host_guard))
         .with_state(state)
+}
+
+/// Após um rollback a coleção volta a um schema antigo. Escritas e execuções
+/// ficam bloqueadas até reabrir/migrar; as operações de migração continuam
+/// disponíveis para a tela de recuperação.
+async fn recovery_guard(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let blocking = !matches!(
+        *request.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD
+    ) && !request.uri().path().starts_with("/api/migrations")
+        && request.uri().path() != "/api/collection/reload";
+    if blocking {
+        if let Some(recovery) = state.recovery().await {
+            let info = Error::Conflict {
+                code: "collection_unavailable",
+                message: recovery.message,
+            }
+            .info();
+            return (StatusCode::CONFLICT, Json(json!({ "error": info }))).into_response();
+        }
+    }
+    next.run(request).await
 }
 
 /// Rejeita requisições cujo `Host` não seja loopback. O bind já é local, mas
@@ -154,7 +222,9 @@ impl IntoResponse for ApiError {
         let info = self.0.info();
         let status = match info.category {
             crate::error::ErrorCategory::Internal => StatusCode::INTERNAL_SERVER_ERROR,
-            crate::error::ErrorCategory::Storage => StatusCode::CONFLICT,
+            crate::error::ErrorCategory::Storage => StatusCode::INTERNAL_SERVER_ERROR,
+            crate::error::ErrorCategory::Conflict => StatusCode::CONFLICT,
+            crate::error::ErrorCategory::NotFound => StatusCode::NOT_FOUND,
             _ => StatusCode::BAD_REQUEST,
         };
         (status, Json(json!({ "error": info }))).into_response()
@@ -185,6 +255,8 @@ async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
         "root": state.root,
         "offline": offline_active(&store),
         "warnings": store.warnings,
+        "generation": store.generation,
+        "recovery": state.recovery().await,
     }))
 }
 
@@ -193,10 +265,95 @@ async fn snapshot(State(state): State<AppState>) -> Json<CollectionSnapshot> {
     Json(store.snapshot())
 }
 
-async fn reload(State(state): State<AppState>) -> ApiResult<CollectionSnapshot> {
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChangesQuery {
+    #[serde(default)]
+    generation: Option<String>,
+}
+
+/// Compara a revisão confirmada com o disco. Nunca abre nem repara a coleção;
+/// apenas informa a nova geração, os caminhos alterados e avisos do último
+/// snapshot válido.
+async fn collection_changes(
+    State(state): State<AppState>,
+    Query(query): Query<ChangesQuery>,
+) -> ApiResult<serde_json::Value> {
+    let store = state.store.read().await;
+    let (generation, paths) = store.changes(&state.root)?;
+    let changed = generation != store.generation;
+    let cursor_stale = query
+        .generation
+        .as_deref()
+        .map(|cursor| cursor != generation)
+        .unwrap_or(false);
+    Ok(Json(json!({
+        "generation": generation,
+        "confirmedGeneration": store.generation,
+        "changed": changed,
+        "cursorStale": cursor_stale,
+        // Um cursor de outra coleção (ou de um snapshot já substituído) não
+        // justifica recarregar: só uma divergência real do disco exige
+        // reconciliação. Isso evita recargas em cascata por eventos antigos.
+        "reconcile": changed,
+        "paths": paths,
+        "warnings": store.warnings,
+        "unsupported": store.unsupported,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReloadQuery {
+    #[serde(default)]
+    generation: Option<String>,
+}
+
+/// Reabre a coleção sem migrar. Em conflito, o snapshot anterior permanece
+/// ativo e o erro identifica os caminhos que divergiram.
+async fn reload(
+    State(state): State<AppState>,
+    Query(query): Query<ReloadQuery>,
+) -> ApiResult<CollectionSnapshot> {
     let store = CollectionStore::open(&state.root)?;
+    // YAML inválido não substitui o último snapshot válido: o editor continua
+    // utilizável e o caminho/erro é devolvido para o usuário corrigir o disco.
+    let invalid: Vec<String> = store
+        .unsupported
+        .iter()
+        .filter(|item| item.kind == "invalid")
+        .map(|item| format!("{} ({})", item.path, item.reason))
+        .collect();
+    if !invalid.is_empty() {
+        return Err(Error::Conflict {
+            code: "invalid_collection",
+            message: format!(
+                "a coleção contém YAML inválido; o snapshot anterior foi preservado: {}",
+                invalid.join("; ")
+            ),
+        }
+        .into());
+    }
+    if let Some(expected) = query.generation.as_deref() {
+        if expected != store.generation {
+            let (_, paths) = state.store.read().await.changes(&state.root)?;
+            return Err(Error::Conflict {
+                code: "generation_conflict",
+                message: format!(
+                    "a coleção mudou novamente durante a recarga; caminhos: {}",
+                    if paths.is_empty() {
+                        "(nenhum)".into()
+                    } else {
+                        paths.join(", ")
+                    }
+                ),
+            }
+            .into());
+        }
+    }
     let snapshot = store.snapshot();
     *state.store.write().await = store;
+    state.unblock().await;
     Ok(Json(snapshot))
 }
 
@@ -240,24 +397,38 @@ struct RequestView {
     folder_path: Vec<String>,
 }
 
-async fn get_request(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<RequestView> {
-    let store = state.store.read().await;
-    let entry = store.request(&id)?;
-    let payload = store.request_payload(&id)?;
+fn request_view(store: &CollectionStore, id: &str) -> ApiResult<RequestView> {
+    let entry = store.request(id)?;
+    let payload = store.request_payload(id)?;
     let folder_path = store
         .folder_chain(entry.parent.as_deref())
         .into_iter()
         .map(|folder| folder.name.clone())
         .collect();
-    let tags = store.request_tags(&id).unwrap_or_default();
+    let tags = store.request_tags(id).unwrap_or_default();
     Ok(Json(RequestView {
         payload,
         tags,
         folder_path,
     }))
+}
+
+async fn get_request(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<RequestView> {
+    let store = state.store.read().await;
+    request_view(&store, &id)
+}
+
+/// Abre uma cópia nova da coleção apenas para ler a versão atual do disco.
+/// Não substitui o snapshot ativo nem executa rede/scripts.
+async fn get_request_disk(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<RequestView> {
+    let store = CollectionStore::open(&state.root)?;
+    request_view(&store, &id)
 }
 
 #[derive(Debug, Deserialize)]
@@ -284,12 +455,20 @@ async fn save_request(
     Ok(Json(payload))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExpectedRevisionQuery {
+    #[serde(default)]
+    expected_revision: Option<String>,
+}
+
 async fn delete_request(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(query): Query<ExpectedRevisionQuery>,
 ) -> ApiResult<serde_json::Value> {
     let mut store = state.store.write().await;
-    let trash = store.delete_request(&id)?;
+    let trash = store.delete_request_with(&id, query.expected_revision.as_deref())?;
     state.log.event(
         "info",
         "request.delete",
@@ -334,9 +513,10 @@ async fn rename_folder(
 async fn delete_folder(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(query): Query<ExpectedRevisionQuery>,
 ) -> ApiResult<serde_json::Value> {
     let mut store = state.store.write().await;
-    let trash = store.delete_folder(&id)?;
+    let trash = store.delete_folder_with(&id, query.expected_revision.as_deref())?;
     Ok(Json(json!({ "trash": trash })))
 }
 
@@ -417,6 +597,8 @@ struct SaveEnvironmentBody {
     extends: Option<String>,
     #[serde(default)]
     make_default: bool,
+    #[serde(default)]
+    expected_revision: Option<String>,
 }
 
 async fn create_environment(
@@ -488,7 +670,13 @@ async fn save_environment_inner(
             variables.push(plain);
         }
     }
-    store.upsert_environment(&name, variables, references, body.extends)?;
+    store.upsert_environment_with(
+        &name,
+        variables,
+        references,
+        body.extends,
+        body.expected_revision.as_deref(),
+    )?;
     if body.make_default {
         let settings = store.manifest.settings();
         store.update_settings(settings, Some(name.clone()))?;
@@ -506,9 +694,10 @@ async fn save_environment_inner(
 async fn delete_environment(
     State(state): State<AppState>,
     Path(name): Path<String>,
+    Query(query): Query<ExpectedRevisionQuery>,
 ) -> ApiResult<serde_json::Value> {
     let mut store = state.store.write().await;
-    store.delete_environment(&name)?;
+    store.delete_environment_with(&name, query.expected_revision.as_deref())?;
     Ok(Json(json!({ "deleted": name })))
 }
 
@@ -517,6 +706,8 @@ async fn delete_environment(
 struct SaveSettingsBody {
     settings: CollectionSettings,
     default_environment: Option<String>,
+    #[serde(default)]
+    expected_revision: Option<String>,
 }
 
 async fn save_settings(
@@ -540,8 +731,324 @@ async fn save_settings(
         );
     }
     let mut store = state.store.write().await;
-    store.update_settings(body.settings, body.default_environment)?;
+    store.update_settings_with(
+        body.settings,
+        body.default_environment,
+        body.expected_revision.as_deref(),
+    )?;
     Ok(Json(json!({ "saved": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Rascunhos
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DraftRow {
+    request_id: String,
+    generation: u64,
+    base_revision: Option<String>,
+    updated_at: Option<String>,
+    state: String,
+    file_exists: bool,
+    file_revision: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DraftListView {
+    drafts: Vec<DraftRow>,
+}
+
+async fn list_drafts(State(state): State<AppState>) -> ApiResult<DraftListView> {
+    let store = state.store.read().await;
+    let drafts = crate::drafts::list(&state.root, &store)?
+        .into_iter()
+        .map(|detail| DraftRow {
+            request_id: detail.summary.request_id,
+            generation: detail.summary.generation,
+            base_revision: detail.summary.base_revision,
+            updated_at: detail.summary.updated_at,
+            state: detail.summary.state,
+            file_exists: detail.summary.file_exists,
+            file_revision: detail.summary.file_revision,
+            error: detail.error,
+        })
+        .collect();
+    Ok(Json(DraftListView { drafts }))
+}
+
+async fn get_draft(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<crate::drafts::DraftDetail> {
+    let store = state.store.read().await;
+    Ok(Json(crate::drafts::get(&state.root, &store, &id)?))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveDraftBody {
+    request: crate::model::RequestFile,
+    #[serde(default)]
+    base_revision: Option<String>,
+    #[serde(default)]
+    expected_generation: Option<u64>,
+}
+
+async fn save_draft(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<SaveDraftBody>,
+) -> ApiResult<crate::drafts::DraftRecord> {
+    let store = state.store.read().await;
+    let collection_id = store.manifest.collection_id().map(str::to_string);
+    let record = crate::drafts::save(
+        &state.root,
+        collection_id.as_deref(),
+        &id,
+        body.base_revision,
+        body.expected_generation,
+        body.request,
+    )?;
+    Ok(Json(record))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DraftDeleteQuery {
+    #[serde(default)]
+    generation: Option<u64>,
+}
+
+async fn delete_draft(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<DraftDeleteQuery>,
+) -> ApiResult<serde_json::Value> {
+    let deleted = crate::drafts::delete(&state.root, &id, query.generation)?;
+    Ok(Json(json!({ "deleted": deleted })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AdoptDraftBody {
+    #[serde(default)]
+    parent_id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+async fn adopt_draft(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<AdoptDraftBody>,
+) -> ApiResult<RequestPayload> {
+    let mut store = state.store.write().await;
+    let payload = crate::drafts::adopt(
+        &state.root,
+        &mut store,
+        &id,
+        body.parent_id.as_deref(),
+        body.name,
+    )?;
+    state.log.event(
+        "info",
+        "draft.adopt",
+        "rascunho órfão convertido em requisição",
+        json!({ "requestId": payload.id, "path": payload.path }),
+        &[],
+    );
+    Ok(Json(payload))
+}
+
+// ---------------------------------------------------------------------------
+// Lixeira
+// ---------------------------------------------------------------------------
+
+async fn list_trash(State(state): State<AppState>) -> ApiResult<Vec<crate::trash::TrashEntryView>> {
+    let store = state.store.read().await;
+    Ok(Json(crate::trash::list(&state.root, &store)?))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RestoreTrashBody {
+    #[serde(default)]
+    revision: Option<String>,
+    #[serde(default)]
+    destination_parent_id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+async fn restore_trash(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<RestoreTrashBody>,
+) -> ApiResult<serde_json::Value> {
+    let mut store = state.store.write().await;
+    let outcome = crate::trash::restore(
+        &state.root,
+        &mut store,
+        &id,
+        crate::trash::RestoreOptions {
+            destination_parent_id: body.destination_parent_id,
+            name: body.name,
+            expected_revision: body.revision,
+        },
+    )?;
+    state.log.event(
+        "info",
+        "trash.restore",
+        "item restaurado da lixeira",
+        json!({
+            "entryId": outcome.entry_id,
+            "itemId": outcome.item_id,
+            "kind": outcome.kind,
+            "path": outcome.path,
+            "alreadyRestored": outcome.already_restored,
+        }),
+        &[],
+    );
+    Ok(Json(json!(outcome)))
+}
+
+// ---------------------------------------------------------------------------
+// Migrações e rollback
+// ---------------------------------------------------------------------------
+
+async fn inspect_migration(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
+    let inspection = crate::migration::inspect(&state.root)?;
+    Ok(Json(json!({
+        "inspection": inspection,
+        "operations": crate::migration::list_operations(&state.root)?,
+    })))
+}
+
+async fn list_migrations(State(state): State<AppState>) -> ApiResult<serde_json::Value> {
+    Ok(Json(json!({
+        "operations": crate::migration::list_operations(&state.root)?,
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyMigrationBody {
+    plan_id: String,
+    #[serde(default)]
+    revision: Option<String>,
+    #[serde(default)]
+    confirm: bool,
+}
+
+fn ensure_plan_revision(
+    root: &std::path::Path,
+    plan_id: &str,
+    expected: Option<&str>,
+) -> Result<(), Error> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let operations = crate::migration::list_operations(root)?;
+    let revision = operations
+        .iter()
+        .find(|operation| operation.id == plan_id)
+        .and_then(|operation| operation.revision.as_deref());
+    if revision != Some(expected) {
+        return Err(Error::Conflict {
+            code: "revision_conflict",
+            message: "o plano de migração mudou desde a inspeção; inspecione novamente".into(),
+        });
+    }
+    Ok(())
+}
+
+async fn apply_migration(
+    State(state): State<AppState>,
+    Json(body): Json<ApplyMigrationBody>,
+) -> ApiResult<serde_json::Value> {
+    if !body.confirm {
+        return Err(Error::Conflict {
+            code: "confirmation_required",
+            message: "a migração exige confirmação explícita do plano".into(),
+        }
+        .into());
+    }
+    ensure_plan_revision(&state.root, &body.plan_id, body.revision.as_deref())?;
+    let mut guard = state.store.write().await;
+    let outcome = crate::migration::apply(&state.root, &body.plan_id)?;
+    let store = CollectionStore::open(&state.root)?;
+    let snapshot = store.snapshot();
+    *guard = store;
+    drop(guard);
+    state.unblock().await;
+    state.log.event(
+        "info",
+        "migration.apply",
+        "migração aplicada",
+        json!({
+            "planId": outcome.id,
+            "files": outcome.files,
+            "backup": outcome.backup,
+            "revision": outcome.revision,
+        }),
+        &[],
+    );
+    Ok(Json(json!({ "outcome": outcome, "snapshot": snapshot })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RollbackMigrationBody {
+    #[serde(default)]
+    revision: Option<String>,
+    #[serde(default)]
+    confirm: bool,
+}
+
+async fn rollback_migration(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<RollbackMigrationBody>,
+) -> ApiResult<serde_json::Value> {
+    if !body.confirm {
+        return Err(Error::Conflict {
+            code: "confirmation_required",
+            message: "o rollback exige confirmação explícita".into(),
+        }
+        .into());
+    }
+    ensure_plan_revision(&state.root, &id, body.revision.as_deref())?;
+    state
+        .block(
+            "rollback",
+            "a coleção foi revertida para um schema anterior; reabra e confirme a migração",
+        )
+        .await;
+    let guard = state.store.write().await;
+    let outcome = match crate::migration::rollback(&state.root, &id) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            state.unblock().await;
+            return Err(error.into());
+        }
+    };
+    drop(guard);
+    state.log.event(
+        "warn",
+        "migration.rollback",
+        "rollback concluído",
+        json!({
+            "planId": outcome.id,
+            "files": outcome.files,
+            "revision": outcome.revision,
+        }),
+        &[],
+    );
+    Ok(Json(json!(outcome)))
 }
 
 // ---------------------------------------------------------------------------

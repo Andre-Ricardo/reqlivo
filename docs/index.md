@@ -8,7 +8,7 @@ O **Reqlivo** é um cliente de APIs open source que funciona localmente, sem cri
 
 Inspirado no [Insomnia](https://insomnia.rest/) e no [Bruno](https://www.usebruno.com/). Projeto independente, sem afiliação com esses produtos.
 
-> **MVP funcional:** HTTP, ambientes, autenticação, scripts, testes e importação/exportação já estão disponíveis. Consulte as [limitações](limitacoes.md) para conhecer o escopo atual.
+> **MVP funcional com persistência recuperável (0.3.0):** HTTP, ambientes, autenticação, scripts, testes, importação/exportação, rascunhos, lixeira e migração com rollback. Consulte as [limitações](limitacoes.md) para conhecer o escopo atual.
 
 ## Comece em poucos comandos
 
@@ -32,6 +32,8 @@ O aplicativo abre uma janela nativa. Consulte [desktop e releases](desktop.md) p
 | [Uso](uso.md) | Instalação, interface, CLI, ambientes e execução. |
 | [Formato da coleção](formato.md) | YAML, variáveis, autenticação, scripts e segredos. |
 | [Escopo do MVP](mvp.md) | Funcionalidades implementadas e critérios de aceite. |
+| [Notas da 0.3.0](release-0.3.0.md) | Funcionalidades entregues, migração, compatibilidade e limites. |
+| [Validação da 0.3.0](proxima-release/resultado-validacao.md) | Cenários executados e pendências por critério. |
 | [Limitações](limitacoes.md) | Compatibilidade, restrições e próximos passos. |
 | [Tecnologias e referências](tecnologias.md) | Rust, Node.js, Tauri, bibliotecas e documentação oficial atual consultada com Context7. |
 
@@ -59,6 +61,7 @@ A demonstração usa somente dados sintéticos e um servidor HTTP em loopback. O
 - Ambientes e variáveis com herança, scripts síncronos e asserções declarativas.
 - Importação/exportação de cURL, Postman e OpenCollection, com limites descritos nos guias.
 - Referências de segredos por variáveis do processo e mascaramento de valores conhecidos.
+- Rascunhos protegidos, aviso de edição externa, lixeira restaurável e migração com rollback verificável.
 
 ## Participe
 
