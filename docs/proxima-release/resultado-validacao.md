@@ -4,18 +4,24 @@ title: Resultado de validação da 0.3.0
 
 # Resultado de validação — Reqlivo 0.3.0
 
-**Data da execução:** 2026-10-27 UTC. **Plataforma automatizada:** Linux x86_64 (kernel 7.0.0-38-generic), Rust/Cargo 1.97.1. **Base:** commit `90d46d7`, branch `feat/tauri-desktop`, com alterações não commitadas desta implementação. **Versão verificada:** `0.3.0`.
+**Data da execução:** 2026-10-27 UTC. **Plataformas:** Linux x86_64 (kernel 7.0.0-38-generic) local, Rust/Cargo 1.97.1; workflow remoto em `ubuntu-22.04` e `windows-latest`. **Base:** commit `bbc4822` na `main`, tag `v0.3.0`. **Versão verificada:** `0.3.0`.
 
-**Conclusão:** a automação de núcleo, CLI, IPC e API passou, e 11 fluxos de interface foram exercitados em Chrome headless contra um harness de teste. A matriz manual de desktop, Windows, instaladores, benchmark de 1.000 requisições e publicação **não foi executada**; a release não está declarada pronta nem publicada. Este arquivo registra apenas o que foi realmente executado.
+**Conclusão:** a automação de núcleo, CLI, IPC e API passou; 11 fluxos de interface foram exercitados em Chrome headless; e o workflow remoto compilou/testou Linux e Windows, executou o smoke de abertura e publicou os três instaladores com `SHA256SUMS`. A [release 0.3.0](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) está publicada. A matriz manual de desktop, a auditoria com leitor de tela, o benchmark de 1.000 requisições e a instalação manual em máquinas limpas **não foram executados**. Este arquivo registra apenas o que foi realmente executado.
 
 ## Evidências
 
 | Evidência | Conteúdo |
 |---|---|
 | [checks.txt](../../../evidencias/reqlivo-v0.3.0/checks.txt) | Versões, formatação, 107 testes em duas invocações, verificador de versão, `validate`, check Tauri, `node --check`, build do harness e 11/11 fluxos de UI. |
+| [release v0.3.0](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) | `.deb`, `.AppImage`, `.exe` e `SHA256SUMS` publicados; release verificada com `gh release view`. |
+| [workflow de publicação](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40544605429) | Builds Linux/Windows, smoke de abertura e job `Publicar release` aprovados na tag `v0.3.0`. |
+| [pré-validação em main](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40542757635) | Builds e smoke Linux/Windows aprovados antes da tag. |
 | [ui-acceptance.txt](../../../evidencias/reqlivo-v0.3.0/ui/ui-acceptance.txt) e [capturas](../../../evidencias/reqlivo-v0.3.0/ui/) | Chrome headless: R-02, R-05, R-09, E-01, E-03, E-05, E-06, E-07, E-08, E-09 e G-05, sem falhas. |
 | [demo-cli.txt](../../../evidencias/reqlivo-v0.3.0/demo-cli.txt) | Demonstração CLI nos ambientes `dev` e `seguro` com servidor sintético em loopback. |
 | [migracao-cli.txt](../../../evidencias/reqlivo-v0.3.0/migracao-cli.txt) | Inspeção, aplicação, bloqueio após rollback, nova inspeção e reaplicação em cópia temporária. |
+| [release.txt](../../../evidencias/reqlivo-v0.3.0/release.txt) | Tag, commit, URLs dos workflows, assets, tamanhos e checksums SHA-256. |
+
+Os links para `evidencias/` apontam para o diretório de trabalho local, fora deste repositório; os links de release e workflows são públicos.
 
 ## Checks do projeto
 
@@ -33,6 +39,8 @@ title: Resultado de validação da 0.3.0
 | `node scripts/ui-acceptance.mjs` | 11/11 fluxos headless | aprovado |
 | Demonstração CLI `dev` e `seguro` | 3/3 passaram, hash determinístico | aprovado |
 | Migração CLI em cópia temporária | aplicou, bloqueou após rollback e reaplicou | aprovado |
+| Workflow `Desktop e releases` (push `main`) | Linux e Windows compilaram, testaram e abriram o aplicativo | aprovado |
+| Workflow `Desktop e releases` (tag `v0.3.0`) | builds e smoke passaram; release publicou 3 instaladores e `SHA256SUMS` | aprovado |
 
 Os testes automatizados indicados abaixo estão em `src/drafts.rs`, `src/trash.rs`, `src/migration.rs` e `tests/integration.rs`; todos fazem parte das 107 execuções acima. O harness de interface é exclusivo de teste: o produto continua usando IPC sem listener e os fluxos headless não substituem a validação manual do aplicativo desktop.
 
@@ -98,18 +106,19 @@ Os testes automatizados indicados abaixo estão em `src/drafts.rs`, `src/trash.r
 
 | ID | Resultado | Status |
 |---|---|---|
-| G-01 | Linux automatizado executado (107 testes e 11 fluxos headless); Windows e fluxo manual completo não. | não executado |
+| G-01 | Linux local (107 testes e 11 fluxos headless) e workflow automatizado Linux/Windows aprovados; fluxo manual completo de desktop não. | parcial |
 | G-02 | 107 testes mais demonstração HTTP 200/404; offline, timeout, cancelamento, runner e scripts continuam cobertos. | aprovado |
 | G-03 | IPC sem listener em `tests/desktop.rs`; o harness de teste é um exemplo isolado, não o produto; offline coberto; recuperação e reconciliação só leem o projeto local. | aprovado |
 | G-04 | Rascunho não contém segredo resolvido; redaction/exportação e ausência do conteúdo da lixeira em listagem/log/projeto cobertas. | aprovado |
 | G-05 | UI G-05: foco inicial no primeiro botão, Tab entre botões, Escape como Cancelar, `aria-live`/`role` e contexto preservado. Desktop real e leitor de tela não executados. | parcial |
-| G-06 | Workflows Linux/Windows existem no repositório, mas não foram executados remotamente; nenhum instalador ou checksum foi gerado/verificado nesta execução. | não executado |
+| G-06 | Workflow remoto executado na tag `v0.3.0`; `.deb`, `.AppImage`, `.exe` e `SHA256SUMS` publicados e verificados. A instalação manual em máquinas limpas segue pendente. | aprovado |
 | G-07 | Guias, limitações e notas atualizados, incluindo rascunho em texto claro, harness headless, YAML inválido e coordenação entre processos; revisão editorial feita nesta execução. | aprovado |
 
-## Pendências obrigatórias antes de publicar
+## Pendências pós-publicação
 
 1. Executar a matriz manual de desktop no Linux e no Windows. O harness headless cobre 11 fluxos, mas não substitui WebView, IPC real, leitor de tela, menu nativo nem abertura de instalador.
 2. Medir a reconciliação com 1.000 requisições e registrar máquina, tempo e responsividade.
-3. Gerar `.deb`, `.AppImage`, `.exe` e `SHA256SUMS` pelo workflow, conferir os jobs remotos e fazer smoke dos instaladores.
-4. Corrigir qualquer falha encontrada e atualizar este arquivo com novas evidências, sem converter cenário não executado em aprovação.
-5. Somente então criar a tag `v0.3.0`. A presente execução não cria tag, não publica release e não declara a versão pronta para produção.
+3. Instalar manualmente `.deb`, `.AppImage` e o NSIS em máquinas limpas; o workflow já abriu o AppImage em Xvfb/Openbox e confirmou a janela do executável Windows, mas não testou a instalação em ambiente limpo.
+4. Corrigir qualquer falha encontrada e publicar uma versão de correção com novas evidências, sem converter cenário não executado em aprovação.
+
+A tag `v0.3.0` foi criada em 2026-10-27 e a release foi publicada com os três instaladores e checksums. A matriz manual e o benchmark continuam sendo lacunas conhecidas, não bloqueios retroativos da publicação.

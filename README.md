@@ -7,7 +7,7 @@ Cliente de APIs **local-first**, sem conta e baseado em arquivos. O Reqlivo lê 
 
 [Documentação](https://andre-ricardo.github.io/reqlivo/) · [Contribuir](CONTRIBUTING.md) · [Reportar problema](https://github.com/Andre-Ricardo/reqlivo/issues)
 
-> Estado atual: **MVP funcional com persistência e edição recuperável (0.3.0)**. O escopo implementado e as lacunas conhecidas estão em [docs/mvp.md](docs/mvp.md) e [docs/limitacoes.md](docs/limitacoes.md). A validação da 0.3.0 está em [docs/proxima-release/resultado-validacao.md](docs/proxima-release/resultado-validacao.md); a release está preparada, mas não foi publicada nem validada manualmente em Windows.
+> Estado atual: **MVP funcional com persistência e edição recuperável (0.3.0)**. O escopo implementado e as lacunas conhecidas estão em [docs/mvp.md](docs/mvp.md) e [docs/limitacoes.md](docs/limitacoes.md). A [release 0.3.0](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) está publicada com instaladores Linux/Windows e `SHA256SUMS`; a validação automatizada Linux/Windows passou, mas a matriz manual de desktop e a auditoria com leitor de tela seguem pendentes. Detalhes em [docs/proxima-release/resultado-validacao.md](docs/proxima-release/resultado-validacao.md).
 
 ## O que está pronto
 

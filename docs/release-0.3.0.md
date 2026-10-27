@@ -4,7 +4,18 @@ title: Notas da versão 0.3.0
 
 # Reqlivo 0.3.0 — persistência e edição recuperável
 
-**Estado: versão preparada no código e na documentação.** A publicação é feita pelo workflow `Desktop e releases` ao enviar a tag `v0.3.0`: ele compila Linux (`.deb` e `.AppImage`) e Windows (`.exe`), executa o smoke de abertura e só então cria a release com os instaladores e `SHA256SUMS`. O disparo manual do workflow gera apenas artifacts, sem publicar. A matriz completa está em [resultado-validacao.md](proxima-release/resultado-validacao.md).
+**Estado: publicada em 2026-10-27 na tag `v0.3.0`.** A [release no GitHub](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) contém `.deb`, `.AppImage`, instalador NSIS `.exe` e `SHA256SUMS`. O workflow `Desktop e releases` ([execução](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40544605429)) compilou e testou Linux e Windows, executou o smoke de abertura do AppImage e do executável Windows e só então publicou os artefatos. A matriz completa está em [resultado-validacao.md](proxima-release/resultado-validacao.md); a matriz manual de desktop e a auditoria com leitor de tela continuam pendentes.
+
+## Artefatos publicados
+
+| Arquivo | Plataforma | Tamanho |
+|---|---|---:|
+| `Reqlivo_0.3.0_amd64.deb` | Debian/Ubuntu x86_64 | 7.260.776 bytes |
+| `Reqlivo_0.3.0_amd64.AppImage` | Linux x86_64 | 85.178.872 bytes |
+| `Reqlivo_0.3.0_x64-setup.exe` | Windows x86_64 (NSIS) | 5.257.446 bytes |
+| `SHA256SUMS` | checksums SHA-256 dos três instaladores | 279 bytes |
+
+Os artefatos foram gerados pelo workflow a partir da tag `v0.3.0`. O smoke remoto abriu o AppImage em Xvfb/Openbox e confirmou a janela do executável Windows; a instalação manual em máquinas limpas ainda não foi executada.
 
 ## Funcionalidades entregues
 
@@ -43,19 +54,20 @@ Comandos comuns (`run`, `send`, `validate`, edição) que encontram migração p
 
 ## Validação executada
 
-Em Linux x86_64, sobre a base `90d46d7` com alterações não commitadas:
+Em Linux x86_64, na base local e no workflow remoto:
 
 - `cargo fmt --all -- --check`, `cargo test --locked` (107 testes), `cargo test --workspace --locked` (107 testes), `cargo check --manifest-path src-tauri/Cargo.toml`, `node --check src/assets/app.js`, `node --check scripts/ui-acceptance.mjs` e `scripts/check-version.py` passaram.
+- O workflow remoto `Desktop e releases` passou em `ubuntu-22.04` e `windows-latest` no push para `main` ([pré-validação](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40542757635)) e novamente na tag `v0.3.0` ([publicação](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40544605429)), incluindo o job que publicou os instaladores e o `SHA256SUMS`.
 - `examples/demo validate` passou; a demonstração CLI passou nos ambientes `dev` e `seguro` com servidor sintético em loopback.
 - O cenário CLI de inspeção, aplicação, bloqueio após rollback, nova inspeção e reaplicação passou em cópia temporária da demonstração.
 - Onze fluxos de interface passaram em Chrome headless com dados sintéticos: reabertura de rascunho, guardião, falha/prazo de autosave, criação/movimento/rename/remoção externos, comparação de conflito, YAML inválido, salvar sem recarga, cursor antigo, ID duplicado, manifesto alterado durante edição e foco/teclado. O harness é exclusivo de teste e não cria listener no produto.
 
-Evidências: [checks](../../evidencias/reqlivo-v0.3.0/checks.txt), [UI headless](../../evidencias/reqlivo-v0.3.0/ui/ui-acceptance.txt), [capturas](../../evidencias/reqlivo-v0.3.0/ui/), [demonstração CLI](../../evidencias/reqlivo-v0.3.0/demo-cli.txt) e [migração/rollback](../../evidencias/reqlivo-v0.3.0/migracao-cli.txt).
+Evidências locais (fora deste repositório): [checks](../../evidencias/reqlivo-v0.3.0/checks.txt), [UI headless](../../evidencias/reqlivo-v0.3.0/ui/ui-acceptance.txt), [capturas](../../evidencias/reqlivo-v0.3.0/ui/), [demonstração CLI](../../evidencias/reqlivo-v0.3.0/demo-cli.txt), [migração/rollback](../../evidencias/reqlivo-v0.3.0/migracao-cli.txt) e [release](../../evidencias/reqlivo-v0.3.0/release.txt).
 
 ## Limitações restantes
 
 - A matriz manual de desktop (rascunhos, comparação de alterações, lixeira, diálogo de migração e rollback) **não foi executada** nesta validação. Os 11 fluxos headless não substituem WebView, IPC real, leitor de tela nem validação visual do instalador.
-- Windows, builds Tauri finais, instaladores e checksums **não foram validados** nesta execução; a release não deve ser anunciada até esses passos passarem.
+- Os builds Tauri finais, os três instaladores e o `SHA256SUMS` foram gerados e o smoke automatizado passou em Linux e Windows. A instalação manual dos artefatos publicados em máquinas limpas ainda não foi executada.
 - A falha de disco durante o autosave foi exercitada como falha de transporte no harness, não como indisponibilidade física do disco.
 - A detecção externa é por consulta ao focar/ficar visível, não por watcher nativo contínuo; o prazo de três segundos depende do ciclo de consulta e do tamanho da coleção.
 - Rascunhos são texto local sem criptografia e podem conter credenciais literais digitadas pelo usuário.

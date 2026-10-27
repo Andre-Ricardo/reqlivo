@@ -8,7 +8,7 @@ title: Desktop e releases
 
 ## Instalação
 
-Baixe os artefatos em [GitHub Releases](https://github.com/Andre-Ricardo/reqlivo/releases), quando uma versão desktop estiver publicada:
+Baixe os artefatos da versão atual em [GitHub Releases](https://github.com/Andre-Ricardo/reqlivo/releases). A [0.3.0](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) está publicada com:
 
 | Sistema | Artefato | Dependência de execução |
 |---|---|---|
@@ -92,7 +92,7 @@ git tag v0.3.0
 git push origin v0.3.0
 ```
 
-Para uma versão posterior, atualize os cinco manifestos (`Cargo.toml`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `package.json` e `package-lock.json`) e as entradas dos pacotes próprios em `Cargo.lock`; gere o lock npm com `npm install --package-lock-only` quando necessário. Confira a consistência antes de criar a tag. A versão 0.3.0 está preparada no código e nos guias, mas **não foi publicada**: não há tag, execução remota dos jobs nem assets verificados.
+Para uma versão posterior, atualize os cinco manifestos (`Cargo.toml`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `package.json` e `package-lock.json`) e as entradas dos pacotes próprios em `Cargo.lock`; gere o lock npm com `npm install --package-lock-only` quando necessário. Confira a consistência antes de criar a tag. A versão 0.3.0 foi publicada em 2026-10-27 na tag `v0.3.0`: o workflow remoto passou em Linux e Windows, publicou os três instaladores e o `SHA256SUMS`, e a [release](https://github.com/Andre-Ricardo/reqlivo/releases/tag/v0.3.0) foi verificada. A instalação manual em máquinas limpas e a matriz manual de desktop continuam pendentes.
 
 ## Validação e lacunas
 
@@ -100,7 +100,7 @@ Os testes da ponte IPC verificam criação/persistência/reabertura/exclusão, e
 
 **Observado em execução na 0.2.0:** 64 testes locais aprovados; `cargo check -p reqlivo-desktop --locked` e build debug aprovados. Os builds Linux e Windows geraram os três instaladores e abriram os executáveis. O `.deb` produzido pelo GitHub foi extraído e executado localmente.
 
-**Observado em execução nesta feature:** 107 testes locais aprovados em Linux; `cargo fmt --check`, `cargo test --locked`, `cargo test --workspace --locked`, `cargo check --manifest-path src-tauri/Cargo.toml`, `node --check` e o verificador de versão passaram. A demonstração CLI passou com o servidor sintético, e o cenário de migração/rollback foi executado em cópia temporária. Um harness de teste em Chrome headless exercitou 11 fluxos de interface (rascunhos, guardião, autosave, alterações externas, comparação, YAML inválido, ID duplicado, manifesto e teclado/foco); ele usa um exemplo separado e não cria listener no produto. Evidências: [checks](../../evidencias/reqlivo-v0.3.0/checks.txt), [UI headless](../../evidencias/reqlivo-v0.3.0/ui/ui-acceptance.txt), [capturas](../../evidencias/reqlivo-v0.3.0/ui/), [demonstração](../../evidencias/reqlivo-v0.3.0/demo-cli.txt) e [migração](../../evidencias/reqlivo-v0.3.0/migracao-cli.txt). Os testes automatizados novos cobrem rascunhos, gerações, conflitos, lixeira, migração e a rota IPC de recuperação.
+**Observado em execução nesta feature:** 107 testes locais aprovados em Linux; `cargo fmt --check`, `cargo test --locked`, `cargo test --workspace --locked`, `cargo check --manifest-path src-tauri/Cargo.toml`, `node --check` e o verificador de versão passaram. A demonstração CLI passou com o servidor sintético, e o cenário de migração/rollback foi executado em cópia temporária. Um harness de teste em Chrome headless exercitou 11 fluxos de interface (rascunhos, guardião, autosave, alterações externas, comparação, YAML inválido, ID duplicado, manifesto e teclado/foco); ele usa um exemplo separado e não cria listener no produto. Evidências: [checks](../../evidencias/reqlivo-v0.3.0/checks.txt), [UI headless](../../evidencias/reqlivo-v0.3.0/ui/ui-acceptance.txt), [capturas](../../evidencias/reqlivo-v0.3.0/ui/), [demonstração](../../evidencias/reqlivo-v0.3.0/demo-cli.txt) e [migração](../../evidencias/reqlivo-v0.3.0/migracao-cli.txt). Os testes automatizados novos cobrem rascunhos, gerações, conflitos, lixeira, migração e a rota IPC de recuperação. O workflow remoto passou em `ubuntu-22.04` e `windows-latest` na [pré-validação](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40542757635) e na [publicação da tag v0.3.0](https://github.com/Andre-Ricardo/reqlivo/actions/runs/40544605429); a release contém `.deb`, `.AppImage`, `.exe` e `SHA256SUMS`.
 
 ![Aplicativo Tauri no Linux com a coleção sintética](assets/reqlivo-desktop-linux.png)
 

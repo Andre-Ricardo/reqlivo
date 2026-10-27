@@ -124,4 +124,4 @@ A suíte do núcleo cobre:
 3. Adicionar streaming/limite progressivo para respostas grandes (AC-21).
 4. Ampliar importação (OpenAPI/HAR) e tradução de scripts Postman.
 5. Adicionar OAuth2, certificados e proxy como evolução pós-MVP.
-6. Publicar a 0.3.0 somente após CI Linux/Windows, instaladores, checksums e smoke aprovados.
+6. A 0.3.0 foi publicada na tag `v0.3.0` após CI Linux/Windows, instaladores, checksums e smoke automatizado; validar manualmente a instalação em máquinas limpas e ampliar a matriz de desktop.
