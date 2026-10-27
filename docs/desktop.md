@@ -42,9 +42,9 @@ Para abrir uma coleção existente:
 npm run desktop:dev -- -- --collection examples/demo
 ```
 
-Sem argumento, o aplicativo reabre a última pasta escolhida em **Abrir coleção**. Se ela não estiver disponível, usa uma coleção inicial em `app_data_dir()/colecao`. O caminho selecionado fica em `app_data_dir()/last-collection.txt`. Uma pasta inválida escolhida pelo diálogo mantém a coleção anterior aberta.
+Sem argumento, o aplicativo reabre a última pasta escolhida em **Abrir coleção**. Se ela não estiver disponível, usa uma coleção inicial em `app_data_dir()/colecao`. O caminho selecionado fica em `app_data_dir()/last-collection.txt`. Uma pasta inválida escolhida pelo diálogo mantém a coleção anterior aberta. Se a coleção exigir migração, o app não migra sozinho: mostra o diálogo de inspeção e mantém a coleção anterior ativa até confirmar ou cancelar.
 
-Use **Abrir coleção** para trocar a pasta. O aplicativo pede confirmação antes de descartar um rascunho ou fechar uma janela com alterações. Para criar uma coleção em outra pasta, use `reqlivo --collection minha-api init --name "Minha API"` e selecione a pasta no aplicativo. Exportações de conteúdo usam diálogo nativo de salvamento.
+Use **Abrir coleção** para trocar a pasta. O guardião de navegação pede confirmação antes de descartar um rascunho ou fechar uma janela com alterações; **Manter rascunho** preserva a edição em `.reqlivo/drafts/`. Para criar uma coleção em outra pasta, use `reqlivo --collection minha-api init --name "Minha API"` e selecione a pasta no aplicativo. Exportações de conteúdo usam diálogo nativo de salvamento.
 
 ## Arquitetura e permissões
 
@@ -88,21 +88,23 @@ Instaladores ficam em `target/release/bundle/`. O AppImage preserva caminhos rel
 Para publicar a versão preparada, depois de integrar e validar o código:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
-Para uma versão posterior, atualize os quatro manifestos e gere o lock npm com `npm install --package-lock-only`. Confira a consistência antes de criar a tag. O lock Cargo deve acompanhar as mudanças de versão dos pacotes Rust.
+Para uma versão posterior, atualize os cinco manifestos (`Cargo.toml`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `package.json` e `package-lock.json`) e as entradas dos pacotes próprios em `Cargo.lock`; gere o lock npm com `npm install --package-lock-only` quando necessário. Confira a consistência antes de criar a tag. A versão 0.3.0 está preparada no código e nos guias, mas **não foi publicada**: não há tag, execução remota dos jobs nem assets verificados.
 
 ## Validação e lacunas
 
 Os testes da ponte IPC verificam criação/persistência/reabertura/exclusão, erros estruturados e rejeição de caminhos externos. Os testes HTTP existentes continuam verificando o transporte e o cancelamento. O CI compila e empacota o desktop em Linux e Windows, inicia o AppImage no Linux e aguarda até trinta segundos por uma janela visível; no Windows, verifica o executável após dez segundos. No Linux, usa D-Bus e Openbox em uma sessão X11 isolada no Xvfb, exige janela visível e rejeita captura uniforme e registra a imagem como artifact `desktop-smoke-linux`.
 
-**Observado em execução nesta feature:** 64 testes locais aprovados; `cargo check -p reqlivo-desktop --locked` e build debug aprovados. Os builds Linux e Windows geraram os três instaladores e abriram os executáveis. O `.deb` produzido pelo GitHub foi extraído e executado localmente: a coleção sintética apareceu na árvore e no seletor de ambientes, confirmando o carregamento inicial por IPC.
+**Observado em execução na 0.2.0:** 64 testes locais aprovados; `cargo check -p reqlivo-desktop --locked` e build debug aprovados. Os builds Linux e Windows geraram os três instaladores e abriram os executáveis. O `.deb` produzido pelo GitHub foi extraído e executado localmente.
+
+**Observado em execução nesta feature:** 107 testes locais aprovados em Linux; `cargo fmt --check`, `cargo test --locked`, `cargo test --workspace --locked`, `cargo check --manifest-path src-tauri/Cargo.toml`, `node --check` e o verificador de versão passaram. A demonstração CLI passou com o servidor sintético, e o cenário de migração/rollback foi executado em cópia temporária. Um harness de teste em Chrome headless exercitou 11 fluxos de interface (rascunhos, guardião, autosave, alterações externas, comparação, YAML inválido, ID duplicado, manifesto e teclado/foco); ele usa um exemplo separado e não cria listener no produto. Evidências: [checks](../../evidencias/reqlivo-v0.3.0/checks.txt), [UI headless](../../evidencias/reqlivo-v0.3.0/ui/ui-acceptance.txt), [capturas](../../evidencias/reqlivo-v0.3.0/ui/), [demonstração](../../evidencias/reqlivo-v0.3.0/demo-cli.txt) e [migração](../../evidencias/reqlivo-v0.3.0/migracao-cli.txt). Os testes automatizados novos cobrem rascunhos, gerações, conflitos, lixeira, migração e a rota IPC de recuperação.
 
 ![Aplicativo Tauri no Linux com a coleção sintética](assets/reqlivo-desktop-linux.png)
 
-Validação interativa ainda necessária em cada plataforma: primeiro uso, seleção/cancelamento de pasta, editar/salvar/enviar, cancelar execução, importar/exportar e fechar janela com rascunho. Build automatizado não equivale a teste visual ou execução de instalador. A execução local do desktop depende da instalação de GTK/WebKit no ambiente de desenvolvimento.
+Validação interativa ainda necessária em cada plataforma: primeiro uso, seleção/cancelamento de pasta, editar/salvar/enviar, autosave e recuperação de rascunho, alteração externa com comparação, lixeira, confirmação/rollback de migração, cancelar execução, importar/exportar e fechar janela com rascunho. Build automatizado não equivale a teste visual ou execução de instalador. A execução local do desktop depende da instalação de GTK/WebKit no ambiente de desenvolvimento.
 
 ## Referências consultadas
 

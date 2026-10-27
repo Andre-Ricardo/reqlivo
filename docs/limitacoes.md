@@ -28,23 +28,27 @@ O Reqlivo está em nível **MVP funcional**. As limitações abaixo são intenci
 - Apenas `provider: env` está implementado. `system` e `file` existem no modelo, mas não resolvem.
 - Valores literais em auth/headers/query são permitidos no projeto, mas a UI avisa e a exportação padrão os omite. Não há scanner de segredos em corpos livres.
 - A redaction cobre nomes/valores conhecidos, variáveis secretas e padrões de logs/relatórios. Conteúdo arbitrário em corpo de resposta ou script só é mascarado quando contém um valor secreto conhecido.
-- A UI opera por IPC local Tauri. Não existe servidor HTTP da interface.
+- A UI opera por IPC local Tauri. Não existe servidor HTTP da interface. O harness de validação em `examples/ui_harness.rs` é exclusivo de teste, não é distribuído e só abre listener quando executado explicitamente.
 - Não há criptografia em repouso para `.reqlivo/`; o diretório deve ser protegido pelo sistema operacional e ignorado pelo Git.
 - A exportação de projeto é sanitizada e reescrita; não é um espelho byte a byte. Para preservar comentários e formatação, use o diretório original.
 - Arquivos extras do projeto (README, notas) são copiados sem inspeção de segredos; apenas os campos modelados são sanitizados.
 
 ## Persistência e edição
 
-- Não há watcher de arquivos. A UI recarrega sob demanda e detecta conflito de revisão ao salvar; não pergunta automaticamente a cada mudança externa.
-- Não há autosave de rascunho. O fechamento da janela exige confirmação quando há alterações; recarregar descarta o rascunho não salvo.
-- A lixeira é um diretório em `.reqlivo/trash/`; não há UI de restauração.
-- Migrações fazem backup e aviso, mas o rollback é manual.
-- A edição simultânea por múltiplos processos não é coordenada além da revisão no momento do save.
+- Não há watcher nativo de arquivos. A UI consulta manifesto, pastas e requisições enquanto está visível e ao receber foco, com reconciliação por hash/geração; uma alteração pode demorar até o próximo ciclo/foco.
+- Rascunhos são protegidos até 2 s após a última edição (limite de 5 s em digitação contínua). Encerramento abrupto antes da gravação pode perder a última tecla; a UI não promete o contrário.
+- Rascunhos são texto local sem criptografia, podem conter credenciais literais digitadas e usam `0600` no Unix. Segredos resolvidos de `provider: env` não são gravados, mas o arquivo deve ser protegido pelo sistema operacional e ignorado pelo Git.
+- Conflitos de revisão são verificados na escrita, sob lock cooperativo em `.reqlivo/lock`. Um lock obsoleto é recuperado por idade (60 s) ou PID morto no Linux. Editores externos que ignoram o lock continuam sujeitos à janela residual entre verificação e substituição; não há transação com eles.
+- A lixeira restaura requisições e pastas vazias, mas não faz exclusão permanente nem expiração automática. Pastas não vazias continuam exigindo mover os itens primeiro; exclusão recursiva está fora desta release.
+- Rollback de migração é bloqueado se algum arquivo tocado foi editado depois da aplicação. Não há botão de forçar nesta release; a recuperação manual preserva o backup. Backups legados da v0.2.0 não têm rollback automático seguro.
+- Não há merge automático entre rascunho e disco. Aplicar uma edição sobre nova base exige comparação e confirmação explícitas.
+- YAML inválido não substitui o último snapshot válido; o erro permanece visível até a correção do arquivo. YAML inválido na primeira abertura ainda é listado como arquivo não suportado.
+- O snapshot usado por um envio/runner é imutável; alterações externas passam a valer na próxima execução. A comparação de conflito lê o disco explicitamente, sem alterar esse snapshot.
 
 ## Interface e acessibilidade
 
 - A interface é uma SPA vanilla, sem framework, com foco no fluxo principal.
-- A árvore, os diálogos e os atalhos principais são acessíveis por teclado; não há auditoria com leitor de tela real nem conformidade WCAG completa.
+- A árvore, os diálogos e os atalhos principais são acessíveis por teclado. Um harness headless audita foco inicial, Tab, Escape e anúncios `aria-live` dos novos diálogos; não há auditoria com leitor de tela real, WebView nativa nem conformidade WCAG completa.
 - Tema escuro fixo; temas avançados estão fora do MVP.
 - Sem i18n: textos em português.
 - Respostas grandes são limitadas/truncadas; não há streaming visual incremental.
@@ -82,9 +86,8 @@ O Reqlivo está em nível **MVP funcional**. As limitações abaixo são intenci
 
 ## Próximos marcos sugeridos
 
-1. Draft/autosave e modal de descarte.
-2. Watcher de arquivos e recarga assistida.
-3. Rollback de migração e UI de lixeira.
-4. Streaming de resposta e upload.
-5. OAuth2, certificados e proxy.
-6. Expansão de importação/interoperabilidade e tradução de scripts.
+1. Validação manual completa da 0.3.0 no desktop Linux e Windows e publicação após CI/instaladores/checksums.
+2. Benchmark de reconciliação com 1.000 requisições e eventual watcher nativo.
+3. Streaming de resposta e upload.
+4. OAuth2, certificados e proxy.
+5. Expansão de importação/interoperabilidade e tradução de scripts.

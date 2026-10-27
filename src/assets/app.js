@@ -33,7 +33,33 @@ const state = {
   lastReport: null,
   exportContent: null,
   envEditing: null,
+  envRevision: null,
+  settingsRevision: null,
+  edits: 0,
+  draft: {
+    generation: 0,
+    exists: false,
+    status: 'idle',
+    timer: null,
+    maxTimer: null,
+    saving: false,
+  },
+  watcher: {
+    timer: null,
+    busy: false,
+    pending: null,
+    started: false,
+  },
+  conflict: null,
+  navResolver: null,
+  pending: null,
+  previousActive: false,
+  drafts: [],
 };
+
+const DRAFT_DEBOUNCE_MS = 2000;
+const DRAFT_MAX_WAIT_MS = 5000;
+const WATCH_INTERVAL_MS = 1500;
 
 function node(tag, attrs = {}, ...children) {
   const element = document.createElement(tag);
@@ -108,6 +134,11 @@ async function confirmAction(message) {
   return window.__TAURI__.core.invoke('confirm_action', { message });
 }
 
+function hostInvoke(command, args = {}) {
+  if (!window.__TAURI__) return Promise.reject(new Error('Operação disponível apenas no aplicativo desktop.'));
+  return window.__TAURI__.core.invoke(command, args);
+}
+
 function encode(value) {
   return encodeURIComponent(value);
 }
@@ -150,16 +181,45 @@ document.addEventListener('DOMContentLoaded', () => {
   bindStaticEvents();
   $('#openCollectionBtn').addEventListener('click', openCollection);
   window.__TAURI__.window.getCurrentWindow().onCloseRequested(async (event) => {
-    if (!state.dirty) return;
     event.preventDefault();
-    if (await confirmAction('Descartar alterações não salvas e fechar o Reqlivo?')) {
-      await window.__TAURI__.core.invoke('close_window');
+    if (!state.dirty) {
+      await window.__TAURI__.core.invoke('close_window').catch((error) => toast(String(error), 'error'));
+      return;
+    }
+    if (await guardNavigation('Fechar o Reqlivo com alterações não salvas?')) {
+      await window.__TAURI__.core.invoke('close_window').catch((error) => toast(String(error), 'error'));
     }
   }).catch((error) => toast(String(error), 'error'));
-  loadAll().catch((error) => {
+  init().catch((error) => {
     showFatal(error);
   });
 });
+
+async function init() {
+  let status = null;
+  try {
+    status = await hostInvoke('collection_status');
+  } catch (error) {
+    showFatal(error);
+    return;
+  }
+  if (status?.status === 'pending') {
+    state.pending = status;
+    state.previousActive = Boolean(status.previousActive);
+    if (!state.previousActive) {
+      renderMigrationScreen(status);
+      showDialog($('#migrationDialog'));
+      return;
+    }
+    await loadAll();
+    startWatcher();
+    renderMigrationScreen(status);
+    showDialog($('#migrationDialog'));
+    return;
+  }
+  await loadAll();
+  startWatcher();
+}
 
 async function loadAll() {
   setStatus('carregando coleção…');
@@ -193,6 +253,27 @@ async function loadAll() {
   if (state.health.offline) {
     $('#offlineBadge').hidden = false;
   }
+  await refreshDraftBadge();
+  const pendingDrafts = state.drafts.filter((draft) => draft.state !== 'absent');
+  if (pendingDrafts.length) {
+    renderDraftsDialog();
+    showDialog($('#draftsDialog'));
+    toast(`${pendingDrafts.length} rascunho(s) protegido(s) aguardando decisão.`, 'warn', 6000);
+  }
+}
+
+function applySnapshot(snapshot) {
+  state.snapshot = snapshot;
+  if (state.environment && snapshot.manifest.config.environments.every((env) => env.name !== state.environment)) {
+    state.environment = snapshot.default_environment || null;
+    storeSet(LS.environment, state.environment);
+  }
+  applyCollectionMeta();
+  renderEnvironmentSelectors();
+  renderTree();
+  renderFolderSelects();
+  renderWarnings();
+  renderSaveState();
 }
 
 function showFatal(error) {
@@ -480,9 +561,10 @@ function handleTreeKeydown(event) {
 /* ------------------------------------------------------------------------- */
 
 async function openRequest(id, force = false) {
-  if (!force && state.dirty && !await confirmAction('Há alterações não salvas. Descartar e abrir outra requisição?')) {
+  if (!force && !await guardNavigation('Abrir outra requisição?')) {
     return;
   }
+  await flushDraft();
   const view = await api(`/api/requests/${encode(id)}`);
   state.current = {
     id,
@@ -494,15 +576,19 @@ async function openRequest(id, force = false) {
   };
   state.selectedFolder = null;
   state.dirty = false;
+  state.edits = 0;
+  state.draft = { generation: 0, exists: false, status: 'idle', timer: null, maxTimer: null, saving: false };
   state.response = null;
   state.rawBody = false;
   state.responseTab = 'body';
   storeSet(LS.request, id);
+  hideDraftBanner();
   showRequest();
   renderRequest();
   renderTree();
   activateTab('params');
   renderResponseTabs();
+  checkDraftForCurrent().catch(() => {});
 }
 
 function showEmpty() {
@@ -558,20 +644,853 @@ function renderSaveState() {
   const element = $('#saveState');
   if (!state.current) {
     element.textContent = '';
+    element.className = 'save-state';
     return;
   }
-  element.classList.toggle('is-dirty', state.dirty);
-  element.classList.toggle('is-saved', !state.dirty);
-  element.textContent = state.dirty
-    ? 'alterações não salvas'
-    : `salvo · revisão ${shortRevision(state.current.revision)}`;
+  element.className = 'save-state';
+  let label;
+  if (state.draft.status === 'saving') {
+    label = 'Protegendo rascunho…';
+    element.classList.add('is-saving');
+  } else if (state.draft.status === 'failed') {
+    label = 'Falha ao proteger rascunho';
+    element.classList.add('is-error');
+  } else if (state.dirty) {
+    label = state.draft.exists && state.draft.status === 'saved'
+      ? 'Alterações não salvas · rascunho protegido'
+      : 'Alterações não salvas';
+    element.classList.add('is-dirty');
+  } else if (state.draft.exists) {
+    label = 'Rascunho protegido · ainda não salvo no YAML';
+    element.classList.add('is-dirty');
+  } else {
+    label = `salvo · revisão ${shortRevision(state.current.revision)}`;
+    element.classList.add('is-saved');
+  }
+  element.textContent = label;
   document.title = `${state.dirty ? '● ' : ''}${state.current.request.info.name || 'Requisição'} · Reqlivo`;
 }
 
-function markDirty() {
+function markDirty(options = {}) {
   state.dirty = true;
+  state.edits += 1;
   renderSaveState();
   updateLocalWarnings();
+  scheduleDraft(Boolean(options.immediate));
+}
+
+function draftSnapshot() {
+  return {
+    requestId: state.current?.id || null,
+    generation: state.draft.generation,
+    baseRevision: state.current?.revision || null,
+    dirty: state.dirty,
+    status: state.draft.status,
+  };
+}
+
+function clearDraftTimers() {
+  if (state.draft.timer) clearTimeout(state.draft.timer);
+  if (state.draft.maxTimer) clearTimeout(state.draft.maxTimer);
+  state.draft.timer = null;
+  state.draft.maxTimer = null;
+}
+
+function scheduleDraft(immediate = false) {
+  if (!state.current) return;
+  state.draft.status = 'dirty';
+  renderSaveState();
+  clearTimeout(state.draft.timer);
+  if (immediate) {
+    state.draft.timer = null;
+    flushDraft();
+    return;
+  }
+  state.draft.timer = setTimeout(() => flushDraft(), DRAFT_DEBOUNCE_MS);
+  if (!state.draft.maxTimer) {
+    state.draft.maxTimer = setTimeout(() => flushDraft(), DRAFT_MAX_WAIT_MS);
+  }
+}
+
+async function flushDraft() {
+  if (!state.current || !state.dirty) return !state.dirty;
+  if (state.draft.saving) return false;
+  const id = state.current.id;
+  const generation = state.draft.generation;
+  const baseRevision = state.current.revision;
+  const editsAtStart = state.edits;
+  clearDraftTimers();
+  state.draft.saving = true;
+  state.draft.status = 'saving';
+  renderSaveState();
+  try {
+    const record = await api(`/api/drafts/${encode(id)}`, {
+      method: 'PUT',
+      body: {
+        request: clone(state.current.request),
+        baseRevision,
+        expectedGeneration: generation || null,
+      },
+    });
+    if (state.current?.id === id) {
+      state.draft.generation = record.generation;
+      state.draft.exists = true;
+      state.draft.status = state.edits === editsAtStart ? 'saved' : 'dirty';
+    }
+    await refreshDraftBadge();
+    return true;
+  } catch (error) {
+    state.draft.status = 'failed';
+    toast(`Falha ao proteger rascunho: ${error.message}`, 'error', 8000);
+    return false;
+  } finally {
+    state.draft.saving = false;
+    renderSaveState();
+    if (state.current?.id === id && state.edits !== editsAtStart && state.dirty) {
+      scheduleDraft();
+    }
+  }
+}
+
+async function discardDraft({ deleteRecord = true, generation } = {}) {
+  if (!state.current) return true;
+  clearDraftTimers();
+  if (deleteRecord && state.draft.exists) {
+    try {
+      await api(`/api/drafts/${encode(state.current.id)}?generation=${encode(generation ?? state.draft.generation)}`, { method: 'DELETE' });
+    } catch (error) {
+      toast(`Não foi possível descartar o rascunho: ${error.message}`, 'error', 7000);
+      return false;
+    }
+  }
+  state.draft.generation = 0;
+  state.draft.exists = false;
+  state.draft.status = 'idle';
+  await refreshDraftBadge();
+  return true;
+}
+
+async function refreshDraftBadge() {
+  try {
+    const data = await api('/api/drafts');
+    state.drafts = data.drafts || [];
+  } catch (_) {
+    state.drafts = [];
+  }
+  const count = state.drafts.filter((draft) => draft.state !== 'absent').length;
+  const button = $('#draftsBtn');
+  if (!button) return;
+  button.hidden = count === 0;
+  button.textContent = `Rascunhos (${count})`;
+}
+
+function showDraftBanner(detail) {
+  const banner = $('#draftBanner');
+  const text = $('#draftBannerText');
+  if (!detail || !detail.record) {
+    banner.hidden = true;
+    return;
+  }
+  const diverged = detail.summary.state === 'diverged';
+  text.textContent = diverged
+    ? 'Há um rascunho protegido e o arquivo mudou no disco. Compare antes de salvar.'
+    : `Rascunho protegido em ${detail.record.updated_at}. Ele ainda não alterou o YAML.`;
+  $('#restoreDraftBtn').hidden = diverged;
+  $('#compareDraftBtn').hidden = !diverged;
+  banner.hidden = false;
+}
+
+function hideDraftBanner() {
+  $('#draftBanner').hidden = true;
+  state.draftDetail = null;
+}
+
+async function checkDraftForCurrent() {
+  if (!state.current) return;
+  const detail = await api(`/api/drafts/${encode(state.current.id)}`);
+  if (detail.summary?.state === 'absent' || !detail.record) {
+    hideDraftBanner();
+    return;
+  }
+  state.draft.generation = detail.summary.generation;
+  state.draft.exists = true;
+  state.draftDetail = detail;
+  showDraftBanner(detail);
+  renderSaveState();
+}
+
+function restoreDraft(detail) {
+  if (!state.current || !detail?.record) return;
+  state.current.request = clone(detail.record.request);
+  state.draft.generation = detail.summary.generation;
+  state.draft.exists = true;
+  state.draft.status = 'saved';
+  state.dirty = true;
+  state.edits += 1;
+  hideDraftBanner();
+  renderRequest();
+  renderTree();
+  // Não agenda gravação: o rascunho já está protegido nesta geração.
+  clearDraftTimers();
+  renderSaveState();
+}
+
+/* ------------------------------------------------------------------------- */
+/* Guardião único de navegação                                               */
+/* ------------------------------------------------------------------------- */
+
+function showNavGuard(message) {
+  return new Promise((resolve) => {
+    state.navResolver = resolve;
+    $('#navGuardText').textContent = message || 'Escolha como continuar antes de sair desta edição.';
+    $('#navGuardHint').textContent = '';
+    $('#navSaveBtn').disabled = false;
+    $('#navKeepBtn').disabled = false;
+    showDialog($('#navGuardDialog'));
+    $('#navSaveBtn').focus();
+  });
+}
+
+function resolveNav(choice) {
+  const resolve = state.navResolver;
+  state.navResolver = null;
+  if ($('#navGuardDialog').open) $('#navGuardDialog').close();
+  if (resolve) resolve(choice);
+}
+
+async function guardNavigation(reason) {
+  if (!state.dirty) return true;
+  const choice = await showNavGuard(reason);
+  if (choice === 'cancel' || !choice) return false;
+  if (choice === 'save') {
+    return saveCurrent();
+  }
+  if (choice === 'discard') {
+    if (!await confirmAction('Descartar as alterações e remover o rascunho protegido? O YAML do disco não será alterado.')) {
+      return false;
+    }
+    const ok = await discardDraft();
+    if (!ok) return false;
+    state.dirty = false;
+    state.edits = 0;
+    state.draft.status = 'idle';
+    hideDraftBanner();
+    renderSaveState();
+    return true;
+  }
+  if (choice === 'keep') {
+    const ok = await flushDraft();
+    if (!ok && state.draft.status !== 'saved') {
+      $('#navGuardHint').textContent = 'O rascunho não pôde ser protegido. Corrija o erro ou use Salvar/Cancelar.';
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Conflitos e comparação                                                    */
+/* ------------------------------------------------------------------------- */
+
+async function openConflictForCurrent() {
+  if (!state.current) return;
+  const id = state.current.id;
+  let detail = null;
+  let disk = null;
+  try {
+    detail = await api(`/api/drafts/${encode(id)}`);
+  } catch (_) { detail = null; }
+  try {
+    // Comparação sempre com a versão atual do disco, não com o snapshot em
+    // memória que o envio/runner continua usando.
+    disk = await api(`/api/requests/${encode(id)}/disk`);
+  } catch (error) {
+    if (error.status === 404) {
+      showExternalBanner('O arquivo desta requisição foi removido no disco. Sua edição continua em rascunho.', {
+        compare: false,
+        reload: true,
+      });
+      toast('Arquivo removido. Use “Rascunhos” para criar uma nova requisição a partir da edição.', 'warn', 8000);
+      return;
+    }
+    throw error;
+  }
+  state.conflict = {
+    requestId: id,
+    local: clone(state.current.request),
+    disk,
+    generation: detail?.summary?.generation || state.draft.generation,
+    baseRevision: state.current.revision,
+    paths: state.watcher.pending?.paths || [],
+  };
+  $('#conflictSummary').textContent = 'O arquivo mudou fora do Reqlivo. Escolha explicitamente o que fazer; nada é sobrescrito automaticamente.';
+  $('#conflictPaths').textContent = [
+    `revisão base ${shortRevision(state.current.revision)}`,
+    `revisão do disco ${shortRevision(disk.payload.revision)}`,
+    state.conflict.paths.length ? `caminhos: ${state.conflict.paths.join(', ')}` : '',
+  ].filter(Boolean).join(' · ');
+  $('#conflictLocal').value = JSON.stringify(state.conflict.local, null, 2);
+  $('#conflictDisk').value = JSON.stringify(disk.payload.request, null, 2);
+  $('#useDiskBtn').hidden = false;
+  $('#applyOverBtn').hidden = false;
+  showDialog($('#conflictDialog'));
+}
+
+/// Alinha o snapshot ativo com a revisão atual do disco antes de uma escrita
+/// explícita. Preserva a edição local suja; só atualiza revisão/caminho.
+async function alignActiveSnapshot() {
+  const changes = await api('/api/collection/changes');
+  if (!changes.changed) return true;
+  const snapshot = await reloadCollection(changes.generation, { silent: true });
+  return Boolean(snapshot);
+}
+
+async function useDiskVersion() {
+  if (!state.conflict) return;
+  if (!await confirmAction('Descartar a edição local e usar exatamente a versão do disco?')) return;
+  const { generation } = state.conflict;
+  if (!await alignActiveSnapshot()) return;
+  let disk;
+  try {
+    disk = await api(`/api/requests/${encode(state.current.id)}/disk`);
+  } catch (error) {
+    toast(`A versão do disco não pôde ser relida: ${error.message}`, 'error', 8000);
+    return;
+  }
+  state.current.request = clone(disk.payload.request);
+  state.current.revision = disk.payload.revision;
+  state.current.path = disk.payload.path;
+  state.current.tags = disk.payload.request.info?.tags || [];
+  state.dirty = false;
+  state.edits = 0;
+  clearDraftTimers();
+  if (generation) {
+    await api(`/api/drafts/${encode(state.current.id)}?generation=${encode(generation)}`, { method: 'DELETE' }).catch(() => {});
+  }
+  state.draft = { generation: 0, exists: false, status: 'idle', timer: null, maxTimer: null, saving: false };
+  state.conflict = null;
+  hideDraftBanner();
+  hideExternalBanner();
+  $('#conflictDialog').close();
+  renderRequest();
+  renderTree();
+  await refreshDraftBadge();
+  toast('Versão do disco carregada.');
+}
+
+async function keepLocalVersion() {
+  if (!state.conflict) return;
+  state.conflict = null;
+  $('#conflictDialog').close();
+  if (state.dirty && !state.draft.exists) {
+    scheduleDraft(true);
+  }
+  toast('Sua edição foi mantida e continua protegida por rascunho.', 'warn');
+}
+
+async function applyOverDisk() {
+  if (!state.conflict) return;
+  if (!await confirmAction('Aplicar sua edição sobre a revisão atual do disco? A versão do disco será substituída pelo YAML salvo.')) return;
+  state.conflict = null;
+  $('#conflictDialog').close();
+  try {
+    // A precondição do salvamento precisa ser a revisão recém-lida do disco.
+    if (!await alignActiveSnapshot()) return;
+    await saveCurrent();
+  } catch (error) {
+    toast(error.message, 'error', 8000);
+  }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Alterações externas                                                       */
+/* ------------------------------------------------------------------------- */
+
+function showExternalBanner(text, options = {}) {
+  $('#externalBannerText').textContent = text;
+  $('#externalCompareBtn').hidden = options.compare === false;
+  $('#externalReloadBtn').hidden = options.reload === false;
+  $('#externalDismissBtn').hidden = options.dismiss === false;
+  $('#externalBanner').hidden = false;
+}
+
+function hideExternalBanner() {
+  $('#externalBanner').hidden = true;
+}
+
+function startWatcher() {
+  if (state.watcher.started) return;
+  state.watcher.started = true;
+  const tick = async () => {
+    await checkExternalChanges().catch(() => {});
+    state.watcher.timer = setTimeout(tick, WATCH_INTERVAL_MS);
+  };
+  state.watcher.timer = setTimeout(tick, WATCH_INTERVAL_MS);
+  window.addEventListener('focus', () => {
+    checkExternalChanges(true).catch(() => {});
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkExternalChanges(true).catch(() => {});
+  });
+}
+
+async function checkExternalChanges(force = false) {
+  if (!state.snapshot || state.watcher.busy) return;
+  if (document.visibilityState === 'hidden' && !force) return;
+  const checkedGeneration = state.snapshot.generation;
+  state.watcher.busy = true;
+  try {
+    const data = await api(`/api/collection/changes?generation=${encode(checkedGeneration)}`);
+    // Uma resposta em voo não pode reabrir aviso nem recarregar depois que o
+    // snapshot mudou (recarga, salvamento ou troca de coleção).
+    if (!state.snapshot || state.snapshot.generation !== checkedGeneration) return;
+    if (!data.reconcile) {
+      state.watcher.pending = null;
+      hideExternalBanner();
+      // Cursor de outra coleção ou de um snapshot já substituído: apenas
+      // alinha a geração, sem recarregar a árvore nem perder a seleção.
+      if (state.snapshot && data.generation) state.snapshot.generation = data.generation;
+      return;
+    }
+    state.watcher.pending = data;
+    const paths = (data.paths || []).join(', ') || 'arquivos da coleção';
+    if (state.dirty && state.current) {
+      showExternalBanner(`Alteração externa em ${paths}. Sua edição local foi preservada; compare antes de salvar.`);
+      return;
+    }
+    if ($('#envDialog').open || $('#settingsDialog').open) {
+      showExternalBanner(`O manifesto mudou (${paths}) enquanto um formulário está aberto. Nada foi substituído.`, {
+        compare: false,
+        reload: true,
+      });
+      return;
+    }
+    if (state.current && !treeHasRequest(state.current.id)) {
+      showExternalBanner('O arquivo da requisição aberta foi removido no disco. A seleção foi preservada.', {
+        compare: false,
+        reload: true,
+      });
+      return;
+    }
+    await reloadCollection(data.generation, { silent: true });
+    toast('Coleção atualizada a partir do disco.', 'ok', 2500);
+  } catch (error) {
+    showExternalBanner(`Falha ao reconciliar a coleção: ${error.message}`, { compare: false, reload: true });
+  } finally {
+    state.watcher.busy = false;
+  }
+}
+
+async function reloadCollection(generation = null, options = {}) {
+  const query = generation ? `?generation=${encode(generation)}` : '';
+  try {
+    const snapshot = await api(`/api/collection/reload${query}`, { method: 'POST' });
+    await afterReload(snapshot, options);
+    return snapshot;
+  } catch (error) {
+    showExternalBanner(`Não foi possível recarregar: ${error.message}`, { compare: false, reload: true });
+    if (!options.silent) toast(error.message, 'error', 8000);
+    return null;
+  }
+}
+
+async function afterReload(snapshot, options = {}) {
+  const currentId = state.current?.id || null;
+  applySnapshot(snapshot);
+  state.health = await api('/api/health').catch(() => state.health);
+  state.environments = await api('/api/environments').catch(() => state.environments);
+  state.watcher.pending = null;
+  hideExternalBanner();
+  // O formulário aberto foi preservado, mas passa a usar a revisão recém
+  // recarregada como precondição do próximo salvamento explícito.
+  if ($('#envDialog').open) state.envRevision = snapshot.manifest_revision || null;
+  if ($('#settingsDialog').open) state.settingsRevision = snapshot.manifest_revision || null;
+  if (currentId && treeHasRequest(currentId)) {
+    try {
+      const view = await api(`/api/requests/${encode(currentId)}`);
+      // A base de comparação passa a ser a revisão atual do disco, mesmo com
+      // edição local preservada; o conteúdo local só é trocado sem sujeira.
+      state.current.revision = view.payload.revision;
+      state.current.path = view.payload.path;
+      if (!state.dirty && !state.draft.exists) {
+        state.current.request = view.payload.request;
+        state.current.tags = view.tags || [];
+      }
+      renderRequest();
+      renderTree();
+      if (state.dirty && !options.silent) {
+        toast('A edição local continua aberta; compare com a nova versão do disco.', 'warn', 6000);
+      }
+    } catch (_) { /* a árvore já reflete a remoção */ }
+  } else if (currentId) {
+    state.current = null;
+    showEmpty();
+  }
+  if (!options.silent) toast('Coleção recarregada.');
+}
+
+/* ------------------------------------------------------------------------- */
+/* Rascunhos: lista e adoção                                                 */
+/* ------------------------------------------------------------------------- */
+
+function renderDraftsDialog() {
+  const list = $('#draftsList');
+  clear(list);
+  const drafts = (state.drafts || []).filter((draft) => draft.state !== 'absent');
+  if (!drafts.length) {
+    list.append(node('p', { class: 'muted' }, 'Nenhum rascunho protegido nesta coleção.'));
+    return;
+  }
+  for (const draft of drafts) {
+    const requestName = allRequests().find((request) => request.id === draft.requestId)?.name;
+    const labels = {
+      current: 'arquivo na revisão base',
+      diverged: 'arquivo mudou no disco',
+      orphan: 'arquivo excluído',
+      corrupt: 'registro ilegível',
+      future: 'versão futura de rascunho',
+    };
+    const row = node('div', { class: 'draft-row', dataset: { draftId: draft.requestId } },
+      node('div', { class: 'draft-info' },
+        node('strong', {}, requestName || draft.requestId),
+        node('span', { class: 'muted' }, `${labels[draft.state] || draft.state} · geração ${draft.generation}${draft.updatedAt ? ` · ${draft.updatedAt}` : ''}`),
+        draft.error ? node('span', { class: 'error-text' }, draft.error) : null,
+      ),
+      node('div', { class: 'draft-actions' },
+        draft.state === 'current' ? node('button', {
+          type: 'button', class: 'btn btn-small',
+          onclick: () => restoreDraftFromList(draft),
+        }, 'Restaurar') : null,
+        draft.state === 'diverged' ? node('button', {
+          type: 'button', class: 'btn btn-small',
+          onclick: () => compareDraftFromList(draft),
+        }, 'Comparar…') : null,
+        draft.state === 'orphan' ? node('button', {
+          type: 'button', class: 'btn btn-small btn-primary',
+          onclick: () => adoptDraftFromList(draft),
+        }, 'Criar requisição') : null,
+        draft.state !== 'corrupt' && draft.state !== 'future' ? node('button', {
+          type: 'button', class: 'btn btn-small btn-danger',
+          onclick: () => discardDraftFromList(draft),
+        }, 'Descartar') : null,
+      ),
+    );
+    list.append(row);
+  }
+}
+
+async function restoreDraftFromList(draft) {
+  try {
+    const detail = await api(`/api/drafts/${encode(draft.requestId)}`);
+    if (!detail.record) throw new Error('rascunho sem conteúdo recuperável');
+    $('#draftsDialog').close();
+    await openRequest(draft.requestId, true);
+    restoreDraft(detail);
+    toast('Rascunho restaurado no editor; o YAML não foi alterado.');
+  } catch (error) {
+    toast(error.message, 'error', 7000);
+  }
+}
+
+async function compareDraftFromList(draft) {
+  $('#draftsDialog').close();
+  await openRequest(draft.requestId, true);
+  await checkDraftForCurrent();
+  await openConflictForCurrent();
+}
+
+async function adoptDraftFromList(draft) {
+  const name = window.prompt('Nome da nova requisição a partir do rascunho:', 'Recuperada');
+  if (name === null || !name.trim()) return;
+  try {
+    const payload = await api(`/api/drafts/${encode(draft.requestId)}/adopt`, {
+      method: 'POST',
+      body: { parentId: state.selectedFolder || null, name: name.trim() },
+    });
+    $('#draftsDialog').close();
+    await refreshSnapshot();
+    await openRequest(payload.id, true);
+    await refreshDraftBadge();
+    toast('Nova requisição criada a partir do rascunho.');
+  } catch (error) {
+    toast(error.message, 'error', 7000);
+  }
+}
+
+async function discardDraftFromList(draft) {
+  if (!await confirmAction(`Descartar o rascunho de “${draft.requestId}”? O YAML do disco não será alterado.`)) return;
+  try {
+    await api(`/api/drafts/${encode(draft.requestId)}?generation=${encode(draft.generation)}`, { method: 'DELETE' });
+    if (state.current?.id === draft.requestId && state.draft.generation === draft.generation) {
+      state.draft = { generation: 0, exists: false, status: 'dirty', timer: null, maxTimer: null, saving: false };
+      hideDraftBanner();
+      renderSaveState();
+    }
+    await refreshDraftBadge();
+    renderDraftsDialog();
+    toast('Rascunho descartado.');
+  } catch (error) {
+    toast(error.message, 'error', 7000);
+  }
+}
+
+async function openDrafts() {
+  await refreshDraftBadge();
+  renderDraftsDialog();
+  showDialog($('#draftsDialog'));
+}
+
+async function discardCurrentDraft() {
+  if (!state.current) return;
+  if (!await confirmAction('Descartar o rascunho protegido e voltar à versão do disco? As alterações não salvas serão perdidas.')) return;
+  const ok = await discardDraft();
+  if (!ok) return;
+  try {
+    const view = await api(`/api/requests/${encode(state.current.id)}`);
+    state.current.request = view.payload.request;
+    state.current.revision = view.payload.revision;
+    state.current.path = view.payload.path;
+    state.current.tags = view.tags || [];
+  } catch (_) { /* arquivo removido: mantém a edição visível */ }
+  state.dirty = false;
+  state.edits = 0;
+  hideDraftBanner();
+  renderRequest();
+  renderSaveState();
+  toast('Rascunho descartado.');
+}
+
+/* ------------------------------------------------------------------------- */
+/* Lixeira                                                                   */
+/* ------------------------------------------------------------------------- */
+
+async function openTrash() {
+  $('#trashResult').hidden = true;
+  showDialog($('#trashDialog'));
+  renderFolderSelects();
+  await loadTrash();
+}
+
+async function loadTrash() {
+  const list = $('#trashList');
+  clear(list);
+  try {
+    state.trash = await api('/api/trash');
+  } catch (error) {
+    list.append(node('p', { class: 'error-text' }, error.message));
+    return;
+  }
+  if (!state.trash.length) {
+    list.append(node('p', { class: 'muted' }, 'A lixeira está vazia.'));
+    return;
+  }
+  state.trash.forEach((entry, index) => {
+    const id = `trash-${entry.id}`;
+    const row = node('label', { class: 'trash-row', for: id },
+      node('input', { type: 'radio', name: 'trashEntry', id, value: entry.id, checked: index === 0 }),
+      node('span', { class: 'trash-info' },
+        node('strong', {}, entry.name || '(sem nome)'),
+        node('span', { class: 'muted' }, `${entry.kind} · ${entry.origin || 'origem desconhecida'}${entry.deletedAt ? ` · ${entry.deletedAt}` : ''}${entry.legacy ? ' · legado' : ''}`),
+        entry.error ? node('span', { class: 'error-text' }, entry.error) : null,
+      ),
+    );
+    list.append(row);
+  });
+}
+
+async function restoreSelectedTrash() {
+  const selected = $('input[name="trashEntry"]:checked');
+  const button = $('#restoreTrashBtn');
+  const result = $('#trashResult');
+  result.hidden = true;
+  if (!selected) {
+    toast('Selecione uma entrada da lixeira.', 'warn');
+    return;
+  }
+  const entry = state.trash?.find((item) => item.id === selected.value);
+  button.disabled = true;
+  try {
+    const outcome = await api(`/api/trash/${encode(selected.value)}/restore`, {
+      method: 'POST',
+      body: {
+        revision: entry?.entryRevision || null,
+        destinationParentId: $('#trashParent').value || null,
+        name: $('#trashName').value.trim() || null,
+      },
+    });
+    result.hidden = false;
+    clear(result);
+    result.append(node('p', {}, `Restaurado: ${outcome.path} (ID ${outcome.itemId}).`));
+    $('#trashName').value = '';
+    await loadTrash();
+    await reloadCollection(null, { silent: true });
+    toast('Item restaurado da lixeira.');
+  } catch (error) {
+    result.hidden = false;
+    clear(result);
+    result.append(node('p', { class: 'error-text' }, error.message));
+    toast(error.message, 'error', 8000);
+    await loadTrash();
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Migração e rollback                                                       */
+/* ------------------------------------------------------------------------- */
+
+function renderMigrationScreen(status) {
+  state.pending = status;
+  state.previousActive = Boolean(status.previousActive);
+  const inspection = status.inspection;
+  const summary = $('#migrationSummary');
+  const files = $('#migrationFiles');
+  clear(summary);
+  clear(files);
+  files.hidden = true;
+  $('#migrationResult').hidden = true;
+  $('#migrationCloseBtn').hidden = !state.previousActive;
+  $('#migrationCancelBtn').textContent = state.previousActive ? 'Cancelar e manter coleção atual' : 'Fechar';
+  const planId = inspection?.planId || null;
+  const revision = inspection?.revision || null;
+  state.pendingPlan = planId ? { planId, revision } : null;
+  $('#migrationApplyBtn').disabled = !planId;
+  if (status.error) {
+    summary.append(node('p', { class: 'error-text' }, status.error));
+  }
+  if (status.root) {
+    summary.append(node('p', { class: 'muted' }, `Coleção: ${status.root}`));
+  }
+  if (!inspection) {
+    summary.append(node('p', {}, 'Não foi possível inspecionar a coleção. Use “Inspecionar novamente” ou abra outra coleção.'));
+    $('#migrationRollbackBtn').hidden = true;
+    return;
+  }
+  summary.append(node('p', {}, `Schema atual ${inspection.currentSchema} → destino ${inspection.targetSchema}.`));
+  summary.append(node('p', {}, inspection.required
+    ? 'Nenhum arquivo do projeto foi alterado pela inspeção. Confirme para aplicar com backup completo.'
+    : 'A coleção está compatível; nenhuma migração é necessária.'));
+  if (inspection.planId) {
+    summary.append(node('p', { class: 'hint' }, `Plano ${inspection.planId} · backup previsto em .reqlivo/backups/${inspection.planId}`));
+  }
+  if (inspection.reasons?.length) {
+    summary.append(node('h4', {}, 'Motivos'), node('ul', { class: 'plain-list' }, ...inspection.reasons.map((reason) => node('li', {}, reason))));
+  }
+  if (inspection.files?.length) {
+    files.hidden = false;
+    files.append(node('h3', {}, `Arquivos afetados (${inspection.files.length})`));
+    files.append(node('ul', { class: 'plain-list' }, ...inspection.files.map((file) => node('li', {}, `${file.action} · ${file.path}`))));
+  }
+  const rollback = (status.operations || inspection.operations || []).find((operation) => operation.state === 'applied' && operation.rollbackEligible);
+  $('#migrationRollbackBtn').hidden = !rollback;
+  state.pendingRollback = rollback || null;
+  if (rollback) {
+    summary.append(node('p', { class: 'hint' }, `Rollback disponível para ${rollback.id}.`));
+  }
+}
+
+async function applyPendingMigration() {
+  if (!state.pendingPlan) {
+    toast('Nenhum plano de migração disponível.', 'error');
+    return;
+  }
+  if (!await confirmAction('Aplicar a migração agora? Um backup completo será gravado antes da primeira escrita.')) return;
+  const button = $('#migrationApplyBtn');
+  button.disabled = true;
+  const result = $('#migrationResult');
+  result.hidden = false;
+  clear(result);
+  result.append(node('p', {}, 'Aplicando migração…'));
+  try {
+    await hostInvoke('migration_apply', {
+      planId: state.pendingPlan.planId,
+      revision: state.pendingPlan.revision,
+    });
+    result.append(node('p', {}, 'Migração aplicada e verificada. Recarregando…'));
+    window.location.reload();
+  } catch (error) {
+    clear(result);
+    result.append(node('p', { class: 'error-text' }, String(error)));
+    toast(String(error), 'error', 9000);
+    button.disabled = false;
+  }
+}
+
+async function rollbackPendingMigration() {
+  const operation = state.pendingRollback;
+  if (!operation) {
+    toast('Nenhum rollback elegível.', 'warn');
+    return;
+  }
+  if (!await confirmAction(`Reverter a migração ${operation.id}? Edições posteriores bloqueiam o rollback.`)) return;
+  const result = $('#migrationResult');
+  result.hidden = false;
+  clear(result);
+  result.append(node('p', {}, 'Revertendo…'));
+  try {
+    await hostInvoke('migration_rollback', {
+      planId: operation.id,
+      revision: operation.revision,
+    });
+    window.location.reload();
+  } catch (error) {
+    clear(result);
+    result.append(node('p', { class: 'error-text' }, String(error)));
+    toast(String(error), 'error', 9000);
+  }
+}
+
+async function openMigrations() {
+  try {
+    const status = await hostInvoke('collection_status');
+    if (status?.status === 'empty') {
+      toast('Nenhuma coleção ativa. Use “Abrir coleção” para selecionar uma pasta.', 'warn');
+      return;
+    }
+    const detail = await hostInvoke('migration_inspect');
+    const operations = detail.operations || [];
+    if (status?.status === 'pending') {
+      renderMigrationScreen({ ...status, inspection: detail.inspection || status.inspection, operations });
+      showDialog($('#migrationDialog'));
+      return;
+    }
+    renderMigrationScreen({
+      status: 'ready',
+      root: detail.root,
+      inspection: detail.inspection || null,
+      operations,
+      error: null,
+      previousActive: true,
+    });
+    const summary = $('#migrationSummary');
+    summary.append(node('h3', {}, 'Operações registradas'));
+    if (!operations.length) {
+      summary.append(node('p', { class: 'muted' }, 'Nenhuma operação de migração registrada.'));
+    } else {
+      summary.append(node('ul', { class: 'plain-list' }, ...operations.map((operation) => node('li', {},
+        `${operation.id} · ${operation.state} · schema ${operation.currentSchema ?? '-'} → ${operation.targetSchema ?? '-'}${operation.blockedPaths?.length ? ` · bloqueado por edição em ${operation.blockedPaths.join(', ')}` : ''}`,
+      ))));
+    }
+    showDialog($('#migrationDialog'));
+  } catch (error) {
+    toast(String(error), 'error', 8000);
+  }
+}
+
+async function cancelMigration() {
+  if (state.pending?.status !== 'pending') {
+    $('#migrationDialog').close();
+    return;
+  }
+  try {
+    const status = await hostInvoke('cancel_pending');
+    $('#migrationDialog').close();
+    window.location.reload();
+  } catch (error) {
+    toast(String(error), 'error');
+  }
 }
 
 function updateLocalWarnings() {
@@ -599,35 +1518,60 @@ function updateLocalWarnings() {
 }
 
 async function saveCurrent() {
-  if (!state.current) return;
+  if (!state.current) return false;
   if (!state.current.request.info.name?.trim()) {
     toast('Dê um nome à requisição antes de salvar.', 'error');
-    return;
+    return false;
   }
   const button = $('#saveBtn');
   button.disabled = true;
+  const editsAtStart = state.edits;
+  const draftGenerationAtSave = state.draft.generation;
+  const requestAtSave = clone(state.current.request);
+  const revisionAtSave = state.current.revision;
   try {
     const payload = await api(`/api/requests/${encode(state.current.id)}`, {
       method: 'PUT',
       body: {
-        request: state.current.request,
-        expectedRevision: state.current.revision,
+        request: requestAtSave,
+        expectedRevision: revisionAtSave,
       },
     });
     state.current.revision = payload.revision;
     state.current.path = payload.path;
-    state.current.request = payload.request;
-    state.current.tags = payload.request.info.tags || [];
-    state.dirty = false;
+    if (state.edits === editsAtStart) {
+      state.current.request = payload.request;
+      state.current.tags = payload.request.info.tags || [];
+      state.dirty = false;
+      state.draft.status = 'idle';
+      state.draft.exists = false;
+      state.draft.generation = 0;
+      clearDraftTimers();
+      if (draftGenerationAtSave) {
+        await api(`/api/drafts/${encode(state.current.id)}?generation=${encode(draftGenerationAtSave)}`, { method: 'DELETE' })
+          .catch((error) => toast(`Requisição salva, mas o rascunho não pôde ser removido: ${error.message}`, 'warn', 7000));
+      }
+      await refreshDraftBadge();
+    } else {
+      // Novas edições durante o salvamento permanecem protegidas por rascunho.
+      state.dirty = true;
+      state.draft.status = 'dirty';
+      scheduleDraft();
+    }
     renderSaveState();
     await refreshSnapshot();
-    toast('Requisição salva.');
+    toast(state.dirty ? 'Requisição salva; edições posteriores seguem em rascunho.' : 'Requisição salva.');
+    return true;
   } catch (error) {
-    if (error.status === 409 || error.info?.category === 'storage') {
-      toast(`${error.message} Use “Recarregar” se o arquivo mudou fora do Reqlivo.`, 'error', 7000);
+    state.draft.status = 'failed';
+    renderSaveState();
+    if (error.status === 409 || error.info?.category === 'storage' || error.info?.category === 'conflict') {
+      toast(`${error.message} Sua edição e o rascunho foram preservados.`, 'error', 8000);
+      openConflictForCurrent().catch(() => {});
     } else {
       toast(error.message, 'error', 6000);
     }
+    return false;
   } finally {
     button.disabled = false;
   }
@@ -1243,16 +2187,7 @@ function renderResponseLogs(container, run) {
 
 async function refreshSnapshot() {
   const snapshot = await api('/api/collection');
-  state.snapshot = snapshot;
-  if (state.environment && snapshot.manifest.config.environments.every((env) => env.name !== state.environment)) {
-    state.environment = snapshot.default_environment || null;
-    storeSet(LS.environment, state.environment);
-  }
-  applyCollectionMeta();
-  renderEnvironmentSelectors();
-  renderTree();
-  renderFolderSelects();
-  renderWarnings();
+  applySnapshot(snapshot);
   if (state.current && !treeHasRequest(state.current.id)) {
     state.current = null;
     state.dirty = false;
@@ -1280,6 +2215,7 @@ function renderWarnings() {
 }
 
 async function createRequest(parentId = state.selectedFolder) {
+  if (!await guardNavigation('Criar uma nova requisição com alterações não salvas?')) return;
   const name = window.prompt('Nome da nova requisição:', 'Nova requisição');
   if (name === null) return;
   if (!name.trim()) {
@@ -1297,11 +2233,6 @@ async function createRequest(parentId = state.selectedFolder) {
       },
     });
     await refreshSnapshot();
-    if (state.dirty) {
-      // A nova requisição substitui a atual; o usuário foi avisado pelo prompt
-      // de criação e pode salvar antes pela interface.
-      state.dirty = false;
-    }
     await openRequest(payload.id, true);
     toast('Requisição criada.');
   } catch (error) {
@@ -1359,7 +2290,9 @@ async function deleteFolder(folder) {
 async function deleteRequest(id) {
   if (!await confirmAction('Mover a requisição para a lixeira? O arquivo permanece recuperável em .reqlivo/trash.')) return;
   try {
-    await api(`/api/requests/${encode(id)}`, { method: 'DELETE' });
+    const revision = state.current?.id === id ? state.current.revision : null;
+    const query = revision ? `?expectedRevision=${encode(revision)}` : '';
+    await api(`/api/requests/${encode(id)}${query}`, { method: 'DELETE' });
     if (state.current?.id === id) {
       state.current = null;
       state.dirty = false;
@@ -1625,7 +2558,7 @@ async function openCollection() {
     toast('Conclua ou cancele a execução antes de trocar de coleção.', 'warn');
     return;
   }
-  if (state.dirty && !await confirmAction('Descartar alterações não salvas e abrir outra coleção?')) return;
+  if (!await guardNavigation('Abrir outra coleção com alterações não salvas?')) return;
   try {
     if (await window.__TAURI__.core.invoke('open_collection')) window.location.reload();
   } catch (error) { toast(String(error), 'error', 7000); }
@@ -1663,6 +2596,7 @@ function renderReport(box, report, title) {
 async function openEnvironments() {
   try {
     state.environments = await api('/api/environments');
+    state.envRevision = state.snapshot?.manifest_revision || null;
     renderEnvDialog();
     showDialog($('#envDialog'));
   } catch (error) {
@@ -1823,6 +2757,7 @@ async function saveEnvironment() {
     })),
     extends: editing.extends.trim() || null,
     makeDefault: $('#envDefault').checked,
+    expectedRevision: state.envRevision,
   };
   try {
     const path = editing.originalName
@@ -1833,9 +2768,15 @@ async function saveEnvironment() {
     storeSet(LS.environment, body.name);
     state.environments = await api('/api/environments');
     await refreshSnapshot();
+    state.envRevision = state.snapshot?.manifest_revision || null;
     renderEnvDialog();
     toast('Ambiente salvo.');
   } catch (error) {
+    if (error.status === 409) {
+      showExternalBanner('O manifesto mudou no disco enquanto o ambiente era editado. Seu formulário foi preservado; recarregue e refaça a alteração.', { compare: false, reload: true });
+      toast('Conflito de revisão: o ambiente não foi salvo. O formulário foi preservado.', 'error', 9000);
+      return;
+    }
     toast(error.message, 'error', 7000);
   }
 }
@@ -1848,13 +2789,15 @@ async function deleteEnvironment() {
   }
   if (!await confirmAction(`Excluir o ambiente “${editing.originalName}”?`)) return;
   try {
-    await api(`/api/environments/${encode(editing.originalName)}`, { method: 'DELETE' });
+    const revisionQuery = state.envRevision ? `?expectedRevision=${encode(state.envRevision)}` : '';
+    await api(`/api/environments/${encode(editing.originalName)}${revisionQuery}`, { method: 'DELETE' });
     if (state.environment === editing.originalName) {
       state.environment = null;
       storeSet(LS.environment, null);
     }
     state.environments = await api('/api/environments');
     await refreshSnapshot();
+    state.envRevision = state.snapshot?.manifest_revision || null;
     state.envEditing = null;
     renderEnvDialog();
     toast('Ambiente excluído.');
@@ -1869,6 +2812,7 @@ async function deleteEnvironment() {
 
 function openSettings() {
   const settings = currentSettings();
+  state.settingsRevision = state.snapshot?.manifest_revision || null;
   $('#setTimeout').value = settings.default_timeout_ms;
   $('#setScriptTimeout').value = settings.script_timeout_ms;
   $('#setRedirects').value = settings.max_redirects;
@@ -1899,12 +2843,19 @@ async function saveSettings() {
       body: {
         settings,
         defaultEnvironment: $('#setDefaultEnv').value || null,
+        expectedRevision: state.settingsRevision,
       },
     });
     await refreshSnapshot();
+    state.settingsRevision = state.snapshot?.manifest_revision || null;
     $('#offlineBadge').hidden = !state.health?.offline && !settings.offline_only;
     toast('Configurações salvas.');
   } catch (error) {
+    if (error.status === 409) {
+      showExternalBanner('O manifesto mudou no disco enquanto as configurações eram editadas. Seus valores foram preservados; recarregue e refaça a alteração.', { compare: false, reload: true });
+      toast('Conflito de revisão: as configurações não foram salvas. O formulário foi preservado.', 'error', 9000);
+      return;
+    }
     toast(error.message, 'error', 7000);
   }
 }
@@ -1980,13 +2931,64 @@ function bindStaticEvents() {
   $('#environmentsBtn').addEventListener('click', openEnvironments);
   $('#helpBtn').addEventListener('click', () => showDialog($('#helpDialog')));
   $('#reloadBtn').addEventListener('click', async () => {
+    if (!await guardNavigation('Recarregar a coleção com alterações não salvas?')) return;
     try {
-      await refreshSnapshot();
-      toast('Coleção recarregada.');
+      await reloadCollection(null);
     } catch (error) {
       toast(error.message, 'error');
     }
   });
+  $('#draftsBtn').addEventListener('click', openDrafts);
+  $('#trashBtn').addEventListener('click', openTrash);
+  $('#migrationsBtn').addEventListener('click', openMigrations);
+
+  $('#externalCompareBtn').addEventListener('click', () => openConflictForCurrent().catch((error) => toast(error.message, 'error')));
+  $('#externalReloadBtn').addEventListener('click', async () => {
+    if (!await guardNavigation('Recarregar a coleção com alterações não salvas?')) return;
+    await reloadCollection(state.watcher.pending?.generation || null);
+  });
+  $('#externalDismissBtn').addEventListener('click', hideExternalBanner);
+
+  $('#restoreDraftBtn').addEventListener('click', () => {
+    if (state.draftDetail) restoreDraft(state.draftDetail);
+  });
+  $('#compareDraftBtn').addEventListener('click', () => openConflictForCurrent().catch((error) => toast(error.message, 'error')));
+  $('#discardDraftBtn').addEventListener('click', discardCurrentDraft);
+
+  $('#navSaveBtn').addEventListener('click', () => resolveNav('save'));
+  $('#navKeepBtn').addEventListener('click', () => resolveNav('keep'));
+  $('#navDiscardBtn').addEventListener('click', () => resolveNav('discard'));
+  $('#navCancelBtn').addEventListener('click', () => resolveNav('cancel'));
+  // Escape no guardião equivale a Cancelar; sem isso a navegação ficaria
+  // pendente e o editor perderia o vínculo com a decisão.
+  $('#navGuardDialog').addEventListener('cancel', (event) => {
+    event.preventDefault();
+    resolveNav('cancel');
+  });
+
+  $('#useDiskBtn').addEventListener('click', () => useDiskVersion().catch((error) => toast(error.message, 'error')));
+  $('#keepMineBtn').addEventListener('click', keepLocalVersion);
+  $('#applyOverBtn').addEventListener('click', () => applyOverDisk().catch((error) => toast(error.message, 'error')));
+  $('#cancelConflictBtn').addEventListener('click', () => {
+    state.conflict = null;
+    $('#conflictDialog').close();
+  });
+  $('#conflictDialog').addEventListener('cancel', () => {
+    state.conflict = null;
+  });
+
+  $('#refreshDraftsBtn').addEventListener('click', async () => {
+    await refreshDraftBadge();
+    renderDraftsDialog();
+  });
+  $('#refreshTrashBtn').addEventListener('click', loadTrash);
+  $('#restoreTrashBtn').addEventListener('click', restoreSelectedTrash);
+
+  $('#migrationApplyBtn').addEventListener('click', applyPendingMigration);
+  $('#migrationRollbackBtn').addEventListener('click', rollbackPendingMigration);
+  $('#migrationCancelBtn').addEventListener('click', cancelMigration);
+  $('#migrationCloseBtn').addEventListener('click', () => $('#migrationDialog').close());
+  $('#migrationInspectBtn').addEventListener('click', openMigrations);
 
   $('#treeSearch').addEventListener('input', (event) => {
     state.treeFilter = event.target.value;

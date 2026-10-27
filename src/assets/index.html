@@ -31,10 +31,21 @@
       <button type="button" id="importBtn" class="btn">Importar</button>
       <button type="button" id="exportBtn" class="btn">Exportar</button>
       <button type="button" id="validateBtn" class="btn">Validar</button>
+      <button type="button" id="trashBtn" class="btn">Lixeira</button>
+      <button type="button" id="migrationsBtn" class="btn">Migrações</button>
       <button type="button" id="settingsBtn" class="btn btn-icon" aria-label="Configurações da coleção" title="Configurações">⚙</button>
       <button type="button" id="helpBtn" class="btn btn-icon" aria-label="Ajuda e atalhos" title="Ajuda">?</button>
     </div>
   </header>
+
+  <div id="externalBanner" class="banner" role="status" aria-live="polite" hidden>
+    <span id="externalBannerText" class="banner-text"></span>
+    <span class="banner-actions">
+      <button type="button" id="externalCompareBtn" class="btn btn-small">Comparar…</button>
+      <button type="button" id="externalReloadBtn" class="btn btn-small">Recarregar coleção</button>
+      <button type="button" id="externalDismissBtn" class="btn btn-small">Dispensar</button>
+    </span>
+  </div>
 
   <div class="layout">
     <aside class="sidebar" aria-label="Coleção">
@@ -46,7 +57,10 @@
       <nav id="tree" class="tree" aria-label="Árvore de pastas e requisições"></nav>
       <div class="sidebar-footer">
         <span id="collectionRoot" class="muted ellipsis"></span>
-        <button type="button" id="warningsBtn" class="btn btn-small" hidden></button>
+        <span class="sidebar-badges">
+          <button type="button" id="draftsBtn" class="btn btn-small" hidden>Rascunhos</button>
+          <button type="button" id="warningsBtn" class="btn btn-small" hidden></button>
+        </span>
       </div>
     </aside>
 
@@ -94,6 +108,14 @@
           <input id="url" class="url-input" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:18080/echo">
           <button type="button" id="sendBtn" class="btn btn-primary">Enviar</button>
           <button type="button" id="cancelSendBtn" class="btn btn-danger" hidden>Cancelar</button>
+        </div>
+        <div id="draftBanner" class="banner banner-inline" role="status" aria-live="polite" hidden>
+          <span id="draftBannerText" class="banner-text"></span>
+          <span class="banner-actions">
+            <button type="button" id="restoreDraftBtn" class="btn btn-small">Restaurar rascunho</button>
+            <button type="button" id="compareDraftBtn" class="btn btn-small">Comparar…</button>
+            <button type="button" id="discardDraftBtn" class="btn btn-small btn-danger">Descartar rascunho</button>
+          </span>
         </div>
         <div id="requestWarnings" class="inline-warnings" hidden></div>
 
@@ -348,6 +370,92 @@
           <li>Projeto é a fonte de verdade; cache, logs e lixeira ficam em <code>.reqlivo/</code>.</li>
         </ul>
       </div>
+    </div>
+  </dialog>
+
+  <dialog id="navGuardDialog" class="dialog" aria-labelledby="navGuardTitle">
+    <div class="dialog-head">
+      <div><h2 id="navGuardTitle">Alterações não salvas</h2><p id="navGuardText">Escolha como continuar antes de sair desta edição.</p></div>
+    </div>
+    <div class="dialog-body">
+      <div class="dialog-actions dialog-actions-stack">
+        <button type="button" id="navSaveBtn" class="btn btn-primary">Salvar</button>
+        <button type="button" id="navKeepBtn" class="btn">Manter rascunho e continuar</button>
+        <button type="button" id="navDiscardBtn" class="btn btn-danger">Descartar alterações</button>
+        <button type="button" id="navCancelBtn" class="btn">Cancelar</button>
+      </div>
+      <p id="navGuardHint" class="hint" role="status" aria-live="polite"></p>
+    </div>
+  </dialog>
+
+  <dialog id="draftsDialog" class="dialog dialog-wide" aria-labelledby="draftsTitle">
+    <form method="dialog" class="dialog-head">
+      <div><h2 id="draftsTitle">Rascunhos protegidos</h2><p>Rascunhos ficam em <code>.reqlivo/drafts/</code> e nunca alteram o YAML até você salvar. Credenciais digitadas no editor podem aparecer nesse arquivo local.</p></div>
+      <button type="submit" class="btn btn-icon" aria-label="Fechar rascunhos">✕</button>
+    </form>
+    <div class="dialog-body">
+      <div id="draftsList" class="draft-list"></div>
+      <div class="dialog-actions">
+        <button type="button" id="refreshDraftsBtn" class="btn">Atualizar lista</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="conflictDialog" class="dialog dialog-wide" aria-labelledby="conflictTitle">
+    <form method="dialog" class="dialog-head">
+      <div><h2 id="conflictTitle">Conflito de revisão</h2><p id="conflictSummary">O arquivo mudou fora do Reqlivo. Compare as versões antes de decidir.</p></div>
+      <button type="submit" class="btn btn-icon" aria-label="Fechar comparação">✕</button>
+    </form>
+    <div class="dialog-body">
+      <p id="conflictPaths" class="hint"></p>
+      <div class="form-grid form-grid-2">
+        <label>Sua edição (rascunho)<textarea id="conflictLocal" class="code-editor" rows="14" readonly></textarea></label>
+        <label>Versão do disco<textarea id="conflictDisk" class="code-editor" rows="14" readonly></textarea></label>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="useDiskBtn" class="btn">Usar versão do disco</button>
+        <button type="button" id="keepMineBtn" class="btn">Manter minha edição</button>
+        <button type="button" id="applyOverBtn" class="btn btn-primary">Aplicar minha edição sobre a nova base</button>
+        <button type="button" id="cancelConflictBtn" class="btn">Cancelar</button>
+      </div>
+      <p class="hint">Nenhuma opção sobrescreve o disco sem confirmação explícita. Uma nova alteração externa gera outro conflito.</p>
+    </div>
+  </dialog>
+
+  <dialog id="trashDialog" class="dialog dialog-wide" aria-labelledby="trashTitle">
+    <form method="dialog" class="dialog-head">
+      <div><h2 id="trashTitle">Lixeira</h2><p>Itens excluídos preservam bytes e ID. Não há esvaziamento nem exclusão permanente nesta versão.</p></div>
+      <button type="submit" class="btn btn-icon" aria-label="Fechar lixeira">✕</button>
+    </form>
+    <div class="dialog-body">
+      <div id="trashList" class="trash-list"></div>
+      <div class="form-grid form-grid-2">
+        <label>Pasta de destino<select id="trashParent"><option value="">raiz</option></select></label>
+        <label>Novo nome (opcional)<input id="trashName" type="text" placeholder="deixe vazio para manter"></label>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="restoreTrashBtn" class="btn btn-primary">Restaurar selecionado</button>
+        <button type="button" id="refreshTrashBtn" class="btn">Atualizar</button>
+      </div>
+      <div id="trashResult" class="report-box" role="status" aria-live="polite" hidden></div>
+    </div>
+  </dialog>
+
+  <dialog id="migrationDialog" class="dialog dialog-wide" aria-labelledby="migrationTitle">
+    <div class="dialog-head">
+      <div><h2 id="migrationTitle">Migração e recuperação</h2><p id="migrationSubtitle">A coleção precisa de uma migração confirmada antes de abrir.</p></div>
+      <button type="button" id="migrationCloseBtn" class="btn btn-icon" aria-label="Fechar migração" hidden>✕</button>
+    </div>
+    <div class="dialog-body">
+      <div id="migrationSummary" class="report-box"></div>
+      <div id="migrationFiles" class="report-box" hidden></div>
+      <div class="dialog-actions">
+        <button type="button" id="migrationApplyBtn" class="btn btn-primary">Confirmar migração</button>
+        <button type="button" id="migrationRollbackBtn" class="btn btn-danger" hidden>Reverter migração</button>
+        <button type="button" id="migrationCancelBtn" class="btn">Cancelar</button>
+        <button type="button" id="migrationInspectBtn" class="btn">Inspecionar novamente</button>
+      </div>
+      <div id="migrationResult" class="report-box" role="status" aria-live="polite" hidden></div>
     </div>
   </dialog>
 

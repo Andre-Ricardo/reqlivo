@@ -84,6 +84,33 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// Inspeciona, aplica ou reverte migrações de schema.
+    Migration {
+        #[command(subcommand)]
+        command: MigrationCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum MigrationCommand {
+    /// Inspeciona a coleção e prepara um plano sem alterar o projeto.
+    Inspect,
+    /// Aplica o plano confirmado, com backup e verificação de hashes.
+    Apply {
+        plan_id: String,
+        /// Revisão do plano vista na inspeção.
+        #[arg(long)]
+        revision: Option<String>,
+    },
+    /// Reverte uma migração aplicada, se não houver edições posteriores.
+    Rollback {
+        backup_id: String,
+        /// Revisão do plano vista na listagem.
+        #[arg(long)]
+        revision: Option<String>,
+    },
+    /// Lista planos, aplicações e rollbacks com elegibilidade.
+    List,
 }
 
 #[derive(Subcommand, Debug)]
@@ -101,6 +128,11 @@ async fn main() {
         Ok(code) => code,
         Err(error) => {
             eprintln!("erro: {error}");
+            if error.info().code == "migration_required" {
+                eprintln!(
+                    "dica: reqlivo --collection <diretório> migration inspect; depois migration apply <plan-id>"
+                );
+            }
             1
         }
     };
@@ -487,7 +519,146 @@ async fn execute(cli: Cli) -> reqlivo::Result<i32> {
             }
             Ok(0)
         }
+        Command::Migration { command } => {
+            let root = discover_root(&cli.collection);
+            match command {
+                MigrationCommand::Inspect => {
+                    let inspection = reqlivo::migration::inspect(&root)?;
+                    if cli.json {
+                        print_json(&inspection)?;
+                    } else if !inspection.required {
+                        println!(
+                            "Coleção compatível (schema {}); nenhuma migração necessária.",
+                            inspection.current_schema
+                        );
+                        if inspection.recovery_required {
+                            println!("aviso: há uma operação interrompida registrada.");
+                        }
+                    } else {
+                        println!(
+                            "Migração necessária: schema {} → {} (plano {}).",
+                            inspection.current_schema,
+                            inspection.target_schema,
+                            inspection.plan_id.as_deref().unwrap_or("-")
+                        );
+                        for reason in &inspection.reasons {
+                            println!("motivo: {reason}");
+                        }
+                        for file in &inspection.files {
+                            println!("arquivo: {} · {}", file.path, file.action);
+                        }
+                        println!(
+                            "Revise e confirme com: reqlivo --collection {} migration apply {}",
+                            root.display(),
+                            inspection.plan_id.as_deref().unwrap_or("<plan-id>")
+                        );
+                        println!("Nenhum arquivo do projeto foi alterado pela inspeção.");
+                    }
+                    Ok(0)
+                }
+                MigrationCommand::Apply { plan_id, revision } => {
+                    if let Some(expected) = revision.as_deref() {
+                        ensure_cli_plan_revision(&root, &plan_id, expected)?;
+                    }
+                    let outcome = reqlivo::migration::apply(&root, &plan_id)?;
+                    let store = CollectionStore::open(&root)?;
+                    if cli.json {
+                        print_json(&serde_json::json!({
+                            "outcome": outcome,
+                            "collection": store.manifest.info.name,
+                            "requests": store.requests.len(),
+                            "generation": store.generation,
+                        }))?;
+                    } else {
+                        println!(
+                            "Migração {} aplicada ({} arquivo(s)); backup em {}.",
+                            outcome.id, outcome.files, outcome.backup
+                        );
+                        println!(
+                            "Coleção válida: {} · {} requisição(ões).",
+                            store.manifest.info.name,
+                            store.requests.len()
+                        );
+                    }
+                    Ok(0)
+                }
+                MigrationCommand::Rollback {
+                    backup_id,
+                    revision,
+                } => {
+                    if let Some(expected) = revision.as_deref() {
+                        ensure_cli_plan_revision(&root, &backup_id, expected)?;
+                    }
+                    let outcome = reqlivo::migration::rollback(&root, &backup_id)?;
+                    if cli.json {
+                        print_json(&outcome)?;
+                    } else {
+                        println!(
+                            "Rollback {} concluído ({} arquivo(s)); estado {}.",
+                            outcome.id, outcome.files, outcome.state
+                        );
+                        println!(
+                            "A coleção voltou a exigir migração; confirme novamente antes de reabrir."
+                        );
+                    }
+                    Ok(0)
+                }
+                MigrationCommand::List => {
+                    let operations = reqlivo::migration::list_operations(&root)?;
+                    if cli.json {
+                        print_json(&serde_json::json!({ "operations": operations }))?;
+                    } else if operations.is_empty() {
+                        println!("Nenhuma operação de migração registrada.");
+                    } else {
+                        for operation in operations {
+                            println!(
+                                "{} · {} · schema {} → {} · rollback {}",
+                                operation.id,
+                                operation.state,
+                                operation
+                                    .current_schema
+                                    .map(|value| value.to_string())
+                                    .unwrap_or_else(|| "-".into()),
+                                operation
+                                    .target_schema
+                                    .map(|value| value.to_string())
+                                    .unwrap_or_else(|| "-".into()),
+                                if operation.rollback_eligible {
+                                    "disponível"
+                                } else if operation.blocked_paths.is_empty() {
+                                    "indisponível"
+                                } else {
+                                    "bloqueado por edições"
+                                }
+                            );
+                            for path in operation.blocked_paths {
+                                println!("  alterado depois da migração: {path}");
+                            }
+                            if let Some(error) = operation.error {
+                                println!("  erro: {error}");
+                            }
+                        }
+                    }
+                    Ok(0)
+                }
+            }
+        }
     }
+}
+
+fn ensure_cli_plan_revision(root: &Path, plan_id: &str, expected: &str) -> reqlivo::Result<()> {
+    let operations = reqlivo::migration::list_operations(root)?;
+    let revision = operations
+        .iter()
+        .find(|operation| operation.id == plan_id)
+        .and_then(|operation| operation.revision.as_deref());
+    if revision != Some(expected) {
+        return Err(Error::Conflict {
+            code: "revision_conflict",
+            message: "o plano de migração mudou; execute `migration inspect` novamente".into(),
+        });
+    }
+    Ok(())
 }
 
 fn open_collection(path: &Path) -> reqlivo::Result<CollectionStore> {

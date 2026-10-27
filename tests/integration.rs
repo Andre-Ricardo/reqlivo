@@ -810,6 +810,1185 @@ async fn server_api_exposes_collection_and_environment_editor() {
         .any(|reference| reference.name == "segredo" && reference.key == "REQLIVO_TEST_API_KEY"));
 }
 
+async fn call(
+    app: &axum::Router,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+) -> (axum::http::StatusCode, Value) {
+    use axum::body::{Body, to_bytes};
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let builder = Request::builder().method(method).uri(uri);
+    let request = match body {
+        Some(body) => builder
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap(),
+        None => builder.body(Body::empty()).unwrap(),
+    };
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, value)
+}
+
+fn error_code(value: &Value) -> &str {
+    value
+        .get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn drafts_api_roundtrips_without_touching_canonical_yaml() {
+    use axum::http::StatusCode;
+
+    let (_dir, mut store) = test_collection("http://127.0.0.1:18080");
+    let payload = store
+        .create_request(None, "Rascunho", "GET", "http://127.0.0.1/echo")
+        .unwrap();
+    let canonical_path = store.request(&payload.id).unwrap().path.clone();
+    let canonical_before = std::fs::read(&canonical_path).unwrap();
+    let state = AppState::new(store);
+    let app = server::router(state);
+
+    let mut edited = payload.request.clone();
+    edited.http.url = "http://127.0.0.1/editado".into();
+    let (status, saved) = call(
+        &app,
+        "PUT",
+        &format!("/api/drafts/{}", payload.id),
+        Some(json!({
+            "request": edited,
+            "baseRevision": payload.revision,
+            "expectedGeneration": 0,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["generation"], 1);
+    assert_eq!(std::fs::read(&canonical_path).unwrap(), canonical_before);
+
+    let (status, detail) = call(&app, "GET", &format!("/api/drafts/{}", payload.id), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["summary"]["state"], "current");
+    assert_eq!(
+        detail["record"]["request"]["http"]["url"],
+        "http://127.0.0.1/editado"
+    );
+
+    let (status, listed) = call(&app, "GET", "/api/drafts", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["drafts"].as_array().unwrap().len(), 1);
+
+    let (status, conflict) = call(
+        &app,
+        "PUT",
+        &format!("/api/drafts/{}", payload.id),
+        Some(json!({
+            "request": payload.request,
+            "baseRevision": payload.revision,
+            "expectedGeneration": 0,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&conflict), "draft_generation");
+
+    let (status, missing) = call(&app, "GET", "/api/drafts/req_0000000000000000", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(missing["summary"]["state"], "absent");
+    assert!(missing["record"].is_null());
+}
+
+#[tokio::test]
+async fn changes_endpoint_detects_external_edits_and_reload_rejects_stale_generation() {
+    use axum::http::StatusCode;
+
+    let (_dir, mut store) = test_collection("http://127.0.0.1:18080");
+    let payload = store
+        .create_request(None, "Externa", "GET", "http://127.0.0.1/echo")
+        .unwrap();
+    let path = store.request(&payload.id).unwrap().path.clone();
+    let state = AppState::new(store);
+    let app = server::router(state);
+
+    let (status, snapshot) = call(&app, "GET", "/api/collection", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let confirmed = snapshot["generation"].as_str().unwrap().to_string();
+
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("http://127.0.0.1/echo", "http://127.0.0.1/externo");
+    std::fs::write(&path, text).unwrap();
+
+    let (status, changes) = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={confirmed}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(changes["changed"], true);
+    assert_eq!(changes["cursorStale"], true);
+    assert_eq!(changes["reconcile"], true);
+    assert!(
+        changes["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path.as_str() == Some(payload.path.as_str()))
+    );
+    let external_generation = changes["generation"].as_str().unwrap().to_string();
+
+    let (status, conflict) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={confirmed}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&conflict), "generation_conflict");
+
+    let (status, unchanged) = call(&app, "GET", "/api/collection", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(unchanged["generation"], confirmed);
+
+    let (status, reloaded) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={external_generation}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(reloaded["generation"], external_generation);
+}
+
+#[tokio::test]
+async fn trash_api_deletes_reports_and_restores_with_content_revision() {
+    use axum::http::StatusCode;
+
+    let (dir, mut store) = test_collection("http://127.0.0.1:18080");
+    let payload = store
+        .create_request(None, "Descartável", "GET", "http://127.0.0.1/echo")
+        .unwrap();
+    let path = store.request(&payload.id).unwrap().path.clone();
+    let state = AppState::new(store);
+    let app = server::router(state);
+
+    let (status, deleted) = call(
+        &app,
+        "DELETE",
+        &format!(
+            "/api/requests/{}?expectedRevision={}",
+            payload.id, payload.revision
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let entry_id = deleted["trash"].as_str().unwrap().to_string();
+    assert!(!path.exists());
+
+    let (status, listed) = call(&app, "GET", "/api/trash", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let entry = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == entry_id)
+        .unwrap()
+        .clone();
+    assert_eq!(entry["state"], "trashed");
+    assert_eq!(entry["kind"], "request");
+    let content_revision = entry["entryRevision"].as_str().unwrap().to_string();
+
+    let (status, restored) = call(
+        &app,
+        "POST",
+        &format!("/api/trash/{entry_id}/restore"),
+        Some(json!({ "revision": content_revision, "name": "Restaurada" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(restored["alreadyRestored"], false);
+    let restored_path = dir.path().join(restored["path"].as_str().unwrap());
+    assert!(restored_path.exists());
+    assert_eq!(
+        restored_path.file_name().and_then(|name| name.to_str()),
+        Some("restaurada.yml")
+    );
+    assert!(
+        std::fs::read_to_string(&restored_path)
+            .unwrap()
+            .contains("Descartável")
+    );
+
+    let (status, again) = call(
+        &app,
+        "POST",
+        &format!("/api/trash/{entry_id}/restore"),
+        Some(json!({ "revision": content_revision })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&again), "restore_conflict");
+
+    let (status, stale) = call(
+        &app,
+        "POST",
+        &format!("/api/trash/{entry_id}/restore"),
+        Some(json!({ "revision": "revisao-antiga" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&stale), "revision_conflict");
+}
+
+#[tokio::test]
+async fn manifest_save_rejects_stale_expected_revision_and_preserves_form() {
+    use axum::http::StatusCode;
+
+    let (_dir, mut store) = test_collection("http://127.0.0.1:18080");
+    let payload = store
+        .create_request(None, "Edição", "GET", "http://127.0.0.1/echo")
+        .unwrap();
+    let state = AppState::new(store);
+    let app = server::router(state);
+
+    let (status, view) = call(&app, "GET", &format!("/api/requests/{}", payload.id), None).await;
+    assert_eq!(status, StatusCode::OK);
+    let revision = view["payload"]["revision"].as_str().unwrap().to_string();
+    let mut request = view["payload"]["request"].clone();
+    request["http"]["url"] = json!("http://127.0.0.1/alterado");
+
+    let (status, conflict) = call(
+        &app,
+        "PUT",
+        &format!("/api/requests/{}", payload.id),
+        Some(json!({ "request": request, "expectedRevision": "revisao-antiga" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&conflict), "revision_conflict");
+
+    let (status, saved) = call(
+        &app,
+        "PUT",
+        &format!("/api/requests/{}", payload.id),
+        Some(json!({ "request": request, "expectedRevision": revision })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["request"]["http"]["url"], "http://127.0.0.1/alterado");
+}
+
+#[tokio::test]
+async fn migration_api_requires_confirmation_and_blocks_writes_after_rollback() {
+    use axum::http::StatusCode;
+
+    let (dir, mut store) = test_collection("http://127.0.0.1:18080");
+    let _payload = store
+        .create_request(None, "Migrável", "GET", "http://127.0.0.1/echo")
+        .unwrap();
+    let manifest_path = reqlivo::store::find_manifest(dir.path()).unwrap();
+    let text = std::fs::read_to_string(&manifest_path)
+        .unwrap()
+        .replace("schemaVersion: 1", "schemaVersion: 0");
+    std::fs::write(&manifest_path, text).unwrap();
+
+    let state = AppState::new(store);
+    let app = server::router(state);
+
+    let (status, inspected) = call(&app, "POST", "/api/migrations/inspect", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(inspected["inspection"]["required"], true);
+    let plan_id = inspected["inspection"]["planId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let revision = inspected["inspection"]["revision"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (status, unconfirmed) = call(
+        &app,
+        "POST",
+        "/api/migrations/apply",
+        Some(json!({ "planId": plan_id, "revision": revision })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&unconfirmed), "confirmation_required");
+
+    let (status, stale) = call(
+        &app,
+        "POST",
+        "/api/migrations/apply",
+        Some(json!({
+            "planId": plan_id,
+            "revision": "revisao-antiga",
+            "confirm": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&stale), "revision_conflict");
+
+    let (status, applied) = call(
+        &app,
+        "POST",
+        "/api/migrations/apply",
+        Some(json!({
+            "planId": plan_id,
+            "revision": revision,
+            "confirm": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(applied["outcome"]["state"], "applied");
+
+    let (status, listed) = call(&app, "GET", "/api/migrations", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        listed["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|operation| operation["id"] == plan_id && operation["rollbackEligible"] == true)
+    );
+
+    let (status, rolled_back) = call(
+        &app,
+        "POST",
+        &format!("/api/migrations/{plan_id}/rollback"),
+        Some(json!({ "revision": revision, "confirm": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rolled_back["state"], "rolled_back");
+
+    let (status, blocked) = call(
+        &app,
+        "POST",
+        "/api/requests",
+        Some(json!({
+            "name": "Bloqueada",
+            "method": "GET",
+            "url": "http://127.0.0.1/echo",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&blocked), "collection_unavailable");
+
+    let (status, _still_readable) = call(&app, "GET", "/api/collection", None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, reinspected) = call(&app, "POST", "/api/migrations/inspect", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(reinspected["inspection"]["required"], true);
+    let next_plan = reinspected["inspection"]["planId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let next_revision = reinspected["inspection"]["revision"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, reapplied) = call(
+        &app,
+        "POST",
+        "/api/migrations/apply",
+        Some(json!({
+            "planId": next_plan,
+            "revision": next_revision,
+            "confirm": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(reapplied["outcome"]["state"], "applied");
+
+    let (status, created) = call(
+        &app,
+        "POST",
+        "/api/requests",
+        Some(json!({
+            "name": "Liberada",
+            "method": "GET",
+            "url": "http://127.0.0.1/echo",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(created["request"]["info"]["name"], "Liberada");
+    assert!(CollectionStore::open(dir.path()).is_ok());
+}
+
+#[tokio::test]
+async fn project_export_and_trash_listing_do_not_leak_deleted_content() {
+    use axum::http::StatusCode;
+
+    let (dir, mut store) = test_collection("http://127.0.0.1:18080");
+    let marker = "conteudo-sintetico-exclusivo-da-lixeira";
+    let payload = store
+        .create_request(None, "Item descartado", "POST", "http://127.0.0.1/echo")
+        .unwrap();
+    let mut request = payload.request;
+    request.http.headers.push(reqlivo::model::Header {
+        name: "X-Marcador".into(),
+        value: marker.into(),
+        description: None,
+        disabled: false,
+        extra: Default::default(),
+    });
+    store
+        .save_request(&payload.id, request, Some(&payload.revision))
+        .unwrap();
+    let revision = store.request(&payload.id).unwrap().revision.clone();
+    let state = AppState::new(store);
+    let app = server::router(state.clone());
+
+    let (status, _) = call(
+        &app,
+        "DELETE",
+        &format!("/api/requests/{}?expectedRevision={revision}", payload.id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, listed) = call(&app, "GET", "/api/trash", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!listed.to_string().contains(marker));
+    let log = std::fs::read_to_string(dir.path().join(".reqlivo/logs/events.jsonl")).unwrap();
+    assert!(!log.contains(marker));
+
+    let store = state.store.read().await;
+    let target = tempfile::tempdir().unwrap();
+    let destination = target.path().join("exportado");
+    import_export::export_project(&store, &destination).unwrap();
+    assert!(!destination.join(".reqlivo").exists());
+
+    fn walk(directory: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, files);
+            } else {
+                files.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&destination, &mut files);
+    for path in files {
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(!text.contains(marker), "{}", path.display());
+    }
+}
+
+fn tree_has_id(nodes: &Value, id: &str) -> bool {
+    nodes
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .any(|item| item["id"] == id || tree_has_id(&item["children"], id))
+        })
+        .unwrap_or(false)
+}
+
+#[tokio::test]
+async fn failed_canonical_save_keeps_the_draft_and_both_versions() {
+    use axum::http::StatusCode;
+
+    let (dir, mut store) = test_collection("http://127.0.0.1:18080");
+    let payload = store
+        .create_request(None, "Conflito", "GET", "http://127.0.0.1/echo")
+        .unwrap();
+    let path = store.request(&payload.id).unwrap().path.clone();
+    let state = AppState::new(store);
+    let app = server::router(state);
+
+    let mut edited = payload.request.clone();
+    edited.http.url = "http://127.0.0.1/rascunho".into();
+    let (status, draft) = call(
+        &app,
+        "PUT",
+        &format!("/api/drafts/{}", payload.id),
+        Some(json!({
+            "request": edited,
+            "baseRevision": payload.revision,
+            "expectedGeneration": 0,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(draft["generation"], 1);
+
+    let external = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("http://127.0.0.1/echo", "http://127.0.0.1/externo");
+    std::fs::write(&path, &external).unwrap();
+
+    let mut local = payload.request.clone();
+    local.http.url = "http://127.0.0.1/rascunho".into();
+    let (status, conflict) = call(
+        &app,
+        "PUT",
+        &format!("/api/requests/{}", payload.id),
+        Some(json!({ "request": local, "expectedRevision": payload.revision })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&conflict), "revision_conflict");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), external);
+
+    let (status, detail) = call(&app, "GET", &format!("/api/drafts/{}", payload.id), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["summary"]["generation"], 1);
+    assert_eq!(
+        detail["record"]["request"]["http"]["url"],
+        "http://127.0.0.1/rascunho"
+    );
+    assert!(std::fs::read_to_string(&path).unwrap().contains("/externo"));
+    assert!(
+        !std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("/rascunho")
+    );
+    // A versão do disco é consultada explicitamente para a comparação.
+    let (status, disk) = call(
+        &app,
+        "GET",
+        &format!("/api/requests/{}/disk", payload.id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        disk["payload"]["request"]["http"]["url"],
+        "http://127.0.0.1/externo"
+    );
+    assert_ne!(disk["payload"]["revision"], payload.revision);
+    let _ = dir;
+}
+
+#[tokio::test]
+async fn draft_survives_process_restart_without_sending_anything() {
+    use axum::http::StatusCode;
+
+    let http = start_test_http().await;
+    let (dir, mut store) = test_collection(&http.base);
+    let payload = store
+        .create_request(None, "Recuperável", "GET", &format!("{}/echo", http.base))
+        .unwrap();
+    let canonical = store.request(&payload.id).unwrap().path.clone();
+    let canonical_before = std::fs::read(&canonical).unwrap();
+
+    {
+        let state = AppState::new(store);
+        let app = server::router(state);
+        let mut edited = payload.request.clone();
+        edited.http.url = format!("{}/editado", http.base);
+        let (status, saved) = call(
+            &app,
+            "PUT",
+            &format!("/api/drafts/{}", payload.id),
+            Some(json!({
+                "request": edited,
+                "baseRevision": payload.revision,
+                "expectedGeneration": 0,
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(saved["generation"], 1);
+    }
+
+    // Processo encerrado: o estado em memória desaparece; só o disco permanece.
+    let reopened = CollectionStore::open(dir.path()).unwrap();
+    let state = AppState::new(reopened);
+    let app = server::router(state);
+
+    let (status, listed) = call(&app, "GET", "/api/drafts", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["drafts"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["drafts"][0]["state"], "current");
+
+    let (status, detail) = call(&app, "GET", &format!("/api/drafts/{}", payload.id), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["summary"]["state"], "current");
+    assert_eq!(
+        detail["record"]["request"]["http"]["url"],
+        format!("{}/editado", http.base)
+    );
+    assert_eq!(std::fs::read(&canonical).unwrap(), canonical_before);
+    let (status, view) = call(&app, "GET", &format!("/api/requests/{}", payload.id), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        view["payload"]["request"]["http"]["url"],
+        format!("{}/echo", http.base)
+    );
+    assert!(http.state.recorded.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn external_create_move_atomic_rename_and_remove_converge() {
+    use axum::http::StatusCode;
+
+    let (dir, mut store) = test_collection("http://127.0.0.1:18080");
+    let payload = store
+        .create_request(None, "Echo", "GET", "http://127.0.0.1/echo")
+        .unwrap();
+    let path = store.request(&payload.id).unwrap().path.clone();
+    let original = std::fs::read_to_string(&path).unwrap();
+    let external_id = "req_00000000000000aa";
+    let external = original
+        .replace(&payload.id, external_id)
+        .replace("name: Echo", "name: Externo");
+    let external_path = dir.path().join("externo.yml");
+    std::fs::write(&external_path, &external).unwrap();
+
+    let state = AppState::new(store);
+    let app = server::router(state);
+
+    let mut generation = call(&app, "GET", "/api/collection", None).await.1["generation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, changes) = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={generation}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(changes["changed"], true);
+    assert!(
+        changes["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path.as_str() == Some("externo.yml"))
+    );
+    generation = changes["generation"].as_str().unwrap().to_string();
+    let (status, snapshot) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={generation}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(tree_has_id(&snapshot["tree"], external_id));
+
+    // Gravação atômica por rename, como editores externos costumam fazer.
+    let edited = external.replace("http://127.0.0.1/echo", "http://127.0.0.1/editado");
+    let temporary = dir.path().join(".externo-tmp.yml");
+    std::fs::write(&temporary, edited).unwrap();
+    std::fs::rename(&temporary, &external_path).unwrap();
+    let changes = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={generation}"),
+        None,
+    )
+    .await
+    .1;
+    assert_eq!(changes["changed"], true);
+    generation = changes["generation"].as_str().unwrap().to_string();
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={generation}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, view) = call(&app, "GET", &format!("/api/requests/{external_id}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        view["payload"]["request"]["http"]["url"],
+        "http://127.0.0.1/editado"
+    );
+
+    // Mover o arquivo para uma pasta criada pelo produto.
+    let (status, folder) = call(
+        &app,
+        "POST",
+        "/api/folders",
+        Some(json!({ "name": "Movida" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let folder_dir = dir.path().join("movida");
+    std::fs::rename(&external_path, folder_dir.join("externo.yml")).unwrap();
+    let changes = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={generation}"),
+        None,
+    )
+    .await
+    .1;
+    generation = changes["generation"].as_str().unwrap().to_string();
+    let (status, snapshot) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={generation}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(tree_has_id(&snapshot["tree"], external_id));
+    assert!(tree_has_id(
+        &snapshot["tree"],
+        folder["id"].as_str().unwrap()
+    ));
+
+    // Remoção externa.
+    std::fs::remove_file(folder_dir.join("externo.yml")).unwrap();
+    let changes = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={generation}"),
+        None,
+    )
+    .await
+    .1;
+    generation = changes["generation"].as_str().unwrap().to_string();
+    let (status, snapshot) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={generation}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!tree_has_id(&snapshot["tree"], external_id));
+}
+
+#[tokio::test]
+async fn invalid_yaml_keeps_last_valid_snapshot_and_recovers_after_fix() {
+    use axum::http::StatusCode;
+
+    let (dir, mut store) = test_collection("http://127.0.0.1:18080");
+    let payload = store
+        .create_request(None, "Instável", "GET", "http://127.0.0.1/echo")
+        .unwrap();
+    let path = store.request(&payload.id).unwrap().path.clone();
+    let original = std::fs::read(&path).unwrap();
+    let state = AppState::new(store);
+    let app = server::router(state);
+    let confirmed = call(&app, "GET", "/api/collection", None).await.1["generation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    std::fs::write(&path, b"info: [\n").unwrap();
+    let changes = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={confirmed}"),
+        None,
+    )
+    .await
+    .1;
+    assert_eq!(changes["changed"], true);
+    let generation = changes["generation"].as_str().unwrap().to_string();
+
+    let (status, conflict) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={generation}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&conflict), "invalid_collection");
+    assert!(
+        conflict["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains(&payload.path)
+    );
+
+    let (status, snapshot) = call(&app, "GET", "/api/collection", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(snapshot["generation"], confirmed);
+    assert!(tree_has_id(&snapshot["tree"], &payload.id));
+    let (status, _) = call(&app, "GET", &format!("/api/requests/{}", payload.id), None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    std::fs::write(&path, &original).unwrap();
+    let changes = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={generation}"),
+        None,
+    )
+    .await
+    .1;
+    let generation = changes["generation"].as_str().unwrap().to_string();
+    let (status, snapshot) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={generation}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(tree_has_id(&snapshot["tree"], &payload.id));
+}
+
+#[tokio::test]
+async fn own_writes_and_draft_saves_do_not_request_reconciliation() {
+    use axum::http::StatusCode;
+
+    let (_dir, mut store) = test_collection("http://127.0.0.1:18080");
+    let payload = store
+        .create_request(None, "Autoral", "GET", "http://127.0.0.1/echo")
+        .unwrap();
+    let state = AppState::new(store);
+    let app = server::router(state);
+    let snapshot = call(&app, "GET", "/api/collection", None).await.1;
+    let confirmed = snapshot["generation"].as_str().unwrap().to_string();
+
+    let mut request = payload.request.clone();
+    request.http.url = "http://127.0.0.1/autoral".into();
+    let (status, saved) = call(
+        &app,
+        "PUT",
+        &format!("/api/requests/{}", payload.id),
+        Some(json!({ "request": request, "expectedRevision": payload.revision })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, changes) = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={confirmed}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(changes["changed"], false);
+    assert_eq!(changes["cursorStale"], true);
+    assert_eq!(changes["reconcile"], false);
+
+    let (status, _) = call(
+        &app,
+        "PUT",
+        &format!("/api/drafts/{}", payload.id),
+        Some(json!({
+            "request": saved["request"],
+            "baseRevision": saved["revision"],
+            "expectedGeneration": 0,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let current = call(&app, "GET", "/api/collection", None).await.1["generation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let changes = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={current}"),
+        None,
+    )
+    .await
+    .1;
+    assert_eq!(changes["changed"], false);
+    assert_eq!(changes["reconcile"], false);
+}
+
+#[tokio::test]
+async fn stale_generation_from_another_collection_does_not_reconcile() {
+    use axum::http::StatusCode;
+
+    let (_dir_a, mut store_a) = test_collection("http://127.0.0.1:18080");
+    let payload_a = store_a
+        .create_request(None, "Anterior", "GET", "http://127.0.0.1/a")
+        .unwrap();
+    let generation_a = store_a.snapshot().generation;
+    assert!(!payload_a.id.is_empty());
+
+    let (_dir_b, mut store_b) = test_collection("http://127.0.0.1:18080");
+    store_b
+        .create_request(None, "Atual", "GET", "http://127.0.0.1/b")
+        .unwrap();
+    let confirmed_b = store_b.snapshot().generation;
+    let state = AppState::new(store_b);
+    let app = server::router(state);
+
+    let (status, changes) = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={generation_a}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(changes["changed"], false);
+    assert_eq!(changes["cursorStale"], true);
+    assert_eq!(changes["reconcile"], false);
+
+    let (status, conflict) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={generation_a}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&conflict), "generation_conflict");
+    let unchanged = call(&app, "GET", "/api/collection", None).await.1;
+    assert_eq!(unchanged["generation"], confirmed_b);
+}
+
+#[tokio::test]
+async fn rename_keeps_id_and_duplicate_id_is_rejected_without_losing_snapshot() {
+    use axum::http::StatusCode;
+
+    let (dir, mut store) = test_collection("http://127.0.0.1:18080");
+    let payload = store
+        .create_request(None, "Renomeável", "GET", "http://127.0.0.1/echo")
+        .unwrap();
+    let path = store.request(&payload.id).unwrap().path.clone();
+    let state = AppState::new(store);
+    let app = server::router(state);
+    let confirmed = call(&app, "GET", "/api/collection", None).await.1["generation"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let renamed = dir.path().join("nome-novo.yml");
+    std::fs::rename(&path, &renamed).unwrap();
+    let changes = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={confirmed}"),
+        None,
+    )
+    .await
+    .1;
+    let generation = changes["generation"].as_str().unwrap().to_string();
+    let (status, snapshot) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={generation}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(tree_has_id(&snapshot["tree"], &payload.id));
+    let (status, view) = call(&app, "GET", &format!("/api/requests/{}", payload.id), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(view["payload"]["path"], "nome-novo.yml");
+
+    let duplicate = dir.path().join("duplicado.yml");
+    std::fs::copy(&renamed, &duplicate).unwrap();
+    let changes = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={generation}"),
+        None,
+    )
+    .await
+    .1;
+    let duplicate_generation = changes["generation"].as_str().unwrap().to_string();
+    let (status, conflict) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={duplicate_generation}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&conflict), "duplicate_id");
+    let (status, snapshot) = call(&app, "GET", "/api/collection", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(snapshot["generation"], generation);
+    assert!(tree_has_id(&snapshot["tree"], &payload.id));
+
+    std::fs::remove_file(&duplicate).unwrap();
+    let changes = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={duplicate_generation}"),
+        None,
+    )
+    .await
+    .1;
+    let recovered = changes["generation"].as_str().unwrap().to_string();
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={recovered}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn environment_save_conflicts_when_cli_changed_manifest_and_preserves_state() {
+    use axum::http::StatusCode;
+
+    let (dir, mut store) = test_collection("http://127.0.0.1:18080");
+    store
+        .create_request(None, "Formulário", "GET", "http://127.0.0.1/echo")
+        .unwrap();
+    let state = AppState::new(store);
+    let app = server::router(state);
+    let snapshot = call(&app, "GET", "/api/collection", None).await.1;
+    let confirmed = snapshot["generation"].as_str().unwrap().to_string();
+    let stale_revision = snapshot["manifest_revision"].as_str().unwrap().to_string();
+
+    // Escritor externo (equivalente ao CLI) altera o manifesto.
+    let mut cli = CollectionStore::open(dir.path()).unwrap();
+    cli.upsert_environment(
+        "externo",
+        vec![Variable::plain("origem", "cli")],
+        Vec::new(),
+        None,
+    )
+    .unwrap();
+
+    let (status, changes) = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={confirmed}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(changes["changed"], true);
+    assert!(
+        changes["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path.as_str() == Some("opencollection.yml"))
+    );
+
+    let (status, conflict) = call(
+        &app,
+        "PUT",
+        "/api/environments/dev",
+        Some(json!({
+            "variables": [{ "name": "naoDeveEntrar", "value": "x" }],
+            "expectedRevision": stale_revision,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(error_code(&conflict), "revision_conflict");
+
+    // O snapshot ativo continua sendo o anterior; o corpo rejeitado não vaza
+    // para a memória nem para o disco.
+    let (status, environments) = call(&app, "GET", "/api/environments", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!environments.to_string().contains("naoDeveEntrar"));
+    assert!(!environments.to_string().contains("externo"));
+    let (_, current) = call(&app, "GET", "/api/collection", None).await;
+    assert_eq!(current["generation"], confirmed);
+    let disk = CollectionStore::open(dir.path()).unwrap();
+    assert!(
+        disk.manifest
+            .environments()
+            .iter()
+            .any(|environment| environment.name == "externo")
+    );
+    assert!(
+        disk.manifest
+            .environments()
+            .iter()
+            .all(|environment| environment.name != "naoDeveEntrar")
+    );
+
+    // Após recarregar, o valor externo aparece e o formulário pode ser reenviado.
+    let changes = call(
+        &app,
+        "GET",
+        &format!("/api/collection/changes?generation={confirmed}"),
+        None,
+    )
+    .await
+    .1;
+    let generation = changes["generation"].as_str().unwrap().to_string();
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/api/collection/reload?generation={generation}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, environments) = call(&app, "GET", "/api/environments", None).await;
+    assert!(environments.to_string().contains("externo"));
+    assert!(!environments.to_string().contains("naoDeveEntrar"));
+}
+
+#[tokio::test]
+async fn runner_uses_the_initial_snapshot_while_the_file_changes() {
+    let http = start_test_http().await;
+    let (dir, mut store) = test_collection(&http.base);
+    let payload = store
+        .create_request(None, "Concorrente", "GET", &format!("{}/slow", http.base))
+        .unwrap();
+    let path = store.request(&payload.id).unwrap().path.clone();
+    let request = payload.request.clone();
+    let options = ExecuteOptions {
+        environment: Some("dev".into()),
+        cookie_jar: Arc::new(reqwest::cookie::Jar::default()),
+        cancellation: None,
+    };
+    let first = runner::execute_single(&store, &payload.id, &request, options.clone());
+    tokio::pin!(first);
+    tokio::select! {
+        outcome = &mut first => panic!("execução terminou cedo demais: {outcome:?}"),
+        _ = tokio::time::sleep(Duration::from_millis(50)) => {}
+    }
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("/slow", "/ok");
+    std::fs::write(&path, text).unwrap();
+    let outcome = first.await.unwrap();
+    assert_eq!(outcome.run.url, format!("{}/slow", http.base));
+    let recorded = http.state.recorded.lock().unwrap().clone();
+    assert_eq!(recorded.last().unwrap().path, "/slow");
+
+    let reopened = CollectionStore::open(dir.path()).unwrap();
+    let second = runner::execute_single(
+        &reopened,
+        &payload.id,
+        &reopened.request(&payload.id).unwrap().file.clone(),
+        options,
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.run.url, format!("{}/ok", http.base));
+    let recorded = http.state.recorded.lock().unwrap().clone();
+    assert_eq!(recorded.last().unwrap().path, "/ok");
+}
+
 trait InfoName {
     fn info_name(&self) -> &str;
 }

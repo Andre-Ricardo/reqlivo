@@ -11,6 +11,8 @@
 # Build local da documentação e Python
 docs/_site/
 docs/.jekyll-cache/
+# Planejamento local para o agente implementador
+/docs/proxima-release/
 __pycache__/
 *.pyc
 

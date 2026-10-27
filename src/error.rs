@@ -7,6 +7,8 @@ use std::fmt;
 pub enum ErrorCategory {
     Config,
     Storage,
+    Conflict,
+    NotFound,
     Validation,
     Variable,
     Auth,
@@ -41,6 +43,11 @@ pub enum Error {
     Config(String),
     #[error("{0}")]
     Storage(String),
+    /// Conflito com código estável consumido pela UI (revisão, destino, ID).
+    #[error("{message}")]
+    Conflict { code: &'static str, message: String },
+    #[error("{0}")]
+    NotFound(String),
     #[error("{0}")]
     Validation(String),
     #[error("{0}")]
@@ -73,6 +80,8 @@ impl Error {
         let (category, code, retryable) = match self {
             Error::Config(_) => (ErrorCategory::Config, "config", false),
             Error::Storage(_) => (ErrorCategory::Storage, "storage", false),
+            Error::Conflict { code, .. } => (ErrorCategory::Conflict, *code, false),
+            Error::NotFound(_) => (ErrorCategory::NotFound, "not_found", false),
             Error::Validation(_) => (ErrorCategory::Validation, "validation", false),
             Error::Variable(_) => (ErrorCategory::Variable, "variable", false),
             Error::Auth(_) => (ErrorCategory::Auth, "auth", false),

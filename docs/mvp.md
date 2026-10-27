@@ -35,6 +35,7 @@ O produto **não** tenta ser um substituto completo de Insomnia/Bruno nesta fase
 | Importação | cURL, Postman v2.1 (subconjunto), OpenCollection (arquivo/diretório). |
 | Exportação | cURL, Postman, OpenCollection bundled e projeto sanitizado. |
 | Segurança | Segredo por `provider: env`, redaction em logs/relatórios/exportações, IPC local. |
+| Persistência | Rascunhos versionados, reconciliação de alterações externas, lixeira restaurável e migração com rollback. |
 | Offline | Bloqueio de destinos externos e de redirects externos. |
 | Acessibilidade | Foco visível, navegação por teclado na árvore, atalhos e diálogos nativos. |
 
@@ -68,13 +69,13 @@ Legenda: **Entregue** = há implementação e teste automatizado ou validação 
 | AC-11 — 404 sem teste | Entregue | Status `executed`, HTTP 404 visível. |
 | AC-12 — runner determinístico | Entregue | `deterministic_hash_is_stable_across_runs`. |
 | AC-13 — persistência/reabertura | Entregue | Store lê/grava YAML; testes de importação/projeto reabrem a coleção. |
-| AC-14 — rascunho não salvo | Parcial | Confirmação ao fechar a janela; não há autosave de rascunho. |
-| AC-15 — edição externa | Parcial | Revisão SHA-256 + conflito 409 + recarregar; não há watcher automático. |
+| AC-14 — rascunho não salvo | Parcial | Autosave, recuperação, órfãos e guardião implementados e testados no núcleo/IPC e em fluxos headless; validação no desktop real pendente. |
+| AC-15 — edição externa | Parcial | Hash/geração, recarga assistida, conflito 409 e comparação com o disco; a UI consulta ao focar/ficar visível, sem watcher nativo. Validação desktop pendente. |
 | AC-16 — importação com perdas | Entregue | Relatório de contagem/avisos/perdas; scripts Postman não executam. |
-| AC-17 — exportação segura | Entregue | Auth/headers/query/variáveis sensíveis literais omitidos; projeto sanitizado. |
+| AC-17 — exportação segura | Entregue | Auth/headers/query/variáveis sensíveis literais omitidos; projeto sanitizado; conteúdo da lixeira não é exportado. |
 | AC-18 — modo offline | Entregue | Bloqueio antes da conexão e em redirects; testes de offline. |
-| AC-19 — migração | Parcial | Backup + migração + aviso; rollback é manual, sem UI de confirmação. |
-| AC-20 — acessibilidade | Entregue | Fluxo principal por teclado; foco visível; árvore com setas/Home/End. |
+| AC-19 — migração | Parcial | Inspeção, confirmação, backup, hashes, rollback e recuperação implementados/testados no núcleo, CLI e IPC; validação visual e Windows pendentes. |
+| AC-20 — acessibilidade | Entregue | Fluxo principal por teclado; foco visível; árvore com setas/Home/End; diálogos auditados em headless com Tab, Escape e `aria-live`, sem leitor de tela real. |
 | AC-21 — resposta grande | Parcial | Limite configurável e prévia binária; sem streaming. |
 | AC-22 — CLI consistente | Entregue | Mesmo modelo; `run`/`send` retornam códigos coerentes. |
 
@@ -93,7 +94,12 @@ A suíte do núcleo cobre:
 - importação/exportação cURL, Postman, OpenCollection e projeto;
 - sanitização de credenciais na exportação;
 - ambiente padrão em `execute_single`;
-- API do servidor, incluindo validação e cancelamento de envio com ID do cliente.
+- API do servidor, incluindo validação e cancelamento de envio com ID do cliente;
+- rascunhos: roundtrip sem tocar no YAML, gerações, conflitos, isolamento por coleção, órfãos, corrupção/versão futura e segredo resolvido ausente;
+- alterações externas: detecção por geração, conflito de recarga e revisão esperada;
+- lixeira: bytes/ID, pasta vazia, destino ocupado, hash/symlink, legado, ID duplicado e restauração interrompida;
+- migração: inspeção sem escrita, reuso de plano, backup/hashes, falha/interrupção, schema futuro, rollback e bloqueio de edições;
+- interface headless (teste, não produto): reabertura de rascunho, guardião, autosave e falha, criação/movimento/rename/remoção externos, comparação e aplicação, YAML inválido, salvar sem recarga, cursor antigo, ID duplicado, manifesto alterado e foco/teclado.
 
 ## Validação manual da demonstração
 
@@ -113,9 +119,9 @@ A suíte do núcleo cobre:
 
 ## Próximos passos sugeridos
 
-1. Fechar AC-14 com modal de salvar/descartar/cancelar e rascunho local.
-2. Adicionar watcher de arquivos e recarga assistida (AC-15).
-3. Implementar rollback de migração pela UI com confirmação (AC-19).
-4. Adicionar streaming/limite progressivo para respostas grandes (AC-21).
-5. Ampliar importação (OpenAPI/HAR) e tradução de scripts Postman.
-6. Adicionar OAuth2, certificados e proxy como evolução pós-MVP.
+1. Executar a matriz manual de rascunhos, alterações externas, lixeira e migração no desktop Linux e Windows.
+2. Medir reconciliação com 1.000 requisições e decidir se um watcher nativo é necessário; hoje a UI consulta ao focar/ficar visível.
+3. Adicionar streaming/limite progressivo para respostas grandes (AC-21).
+4. Ampliar importação (OpenAPI/HAR) e tradução de scripts Postman.
+5. Adicionar OAuth2, certificados e proxy como evolução pós-MVP.
+6. Publicar a 0.3.0 somente após CI Linux/Windows, instaladores, checksums e smoke aprovados.

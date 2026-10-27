@@ -20,7 +20,14 @@ minha-api/
 ├── segredos/
 │   ├── folder.yml
 │   └── segredo.yml
-└── .reqlivo/                 # cache, logs, lixeira, backups e imports
+└── .reqlivo/                 # estado interno local, fora do formato canônico
+    ├── drafts/               # rascunhos versionados por requisição
+    ├── trash/                # entradas recuperáveis com payload original
+    ├── backups/              # planos, originais e journal de migração
+    ├── imports/              # originais de importação
+    ├── history/              # execuções locais
+    ├── logs/                 # eventos locais
+    └── lock                  # coordenação cooperativa entre processos
 ```
 
 - `opencollection.yml` é o manifesto da coleção.
@@ -272,10 +279,12 @@ Uma requisição sem testes/asserções que recebe HTTP 404 termina como **execu
 
 ## Revisões, lixeira e migração
 
-- Cada arquivo tem uma revisão SHA-256 usada para detectar edição externa.
-- Salvar com revisão divergente retorna conflito; a UI pede recarregar em vez de sobrescrever.
-- Excluir move o item para `.reqlivo/trash/` em vez de apagar diretamente.
-- Migrações de `schemaVersion` geram backup em `.reqlivo/backups/` e um aviso.
+- Cada arquivo tem uma revisão SHA-256 usada para detectar edição externa. O store calcula uma geração da árvore para reconciliação; `.git/`, `.reqlivo/` e temporários ficam fora do fingerprint.
+- Salvar com revisão divergente retorna conflito; a UI pede recarregar em vez de sobrescrever. A verificação e a substituição acontecem sob `.reqlivo/lock`, com recuperação de lock obsoleto por idade ou PID morto no Linux.
+- Excluir move o item para `.reqlivo/trash/` em vez de apagar diretamente. Cada entrada nova tem `entry.json` versionado (ID, tipo, ID lógico, origem, pai, nome, data UTC, hash e estado), `payload/` com os bytes originais e, durante a restauração, um diário `restore.json` para reconciliar interrupções.
+- Rascunhos ficam em `.reqlivo/drafts/<request_id>.json`, com versão, coleção, revisão base, timestamps, geração e conteúdo editável. Eles não alteram o YAML canônico e não guardam resposta, cookies, variáveis de runtime nem segredo resolvido. Podem conter credenciais literais digitadas; no Unix usam `0600`.
+- Migrações de `schemaVersion` geram um plano versionado em `.reqlivo/backups/<plan_id>/`, com bytes originais, bytes propostos, hashes, journal e estado (`prepared`, `applying`, `applied`, `rolling_back`, `rolled_back`, `failed`). A inspeção é somente-leitura; a aplicação e o rollback validam as revisões antes de escrever.
+- Entradas de lixeira e backups da v0.2.0 aparecem como legados: são listados sem alteração e podem exigir recuperação manual.
 - `.reqlivo/` não entra na exportação de projeto.
 
 ## Compatibilidade

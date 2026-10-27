@@ -2845,7 +2845,7 @@ dependencies = [
 
 [[package]]
 name = "reqlivo"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2873,9 +2873,10 @@ dependencies = [
 
 [[package]]
 name = "reqlivo-desktop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "reqlivo",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-build",
